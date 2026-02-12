@@ -20,14 +20,26 @@ interface CanvasProps {
     settings?: BoardSettings;
     onCellHover?: (col: number, row: number) => void;
     onCellClick?: (col: number, row: number) => void;
+    onCellDragStart?: (col: number, row: number) => void;
+    onCellDrag?: (col: number, row: number) => void;
+    onCellDragEnd?: () => void;
 }
 
 const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
-    { gridRef, settings = DEFAULT_SETTINGS, onCellHover, onCellClick },
+    {
+        gridRef,
+        settings = DEFAULT_SETTINGS,
+        onCellHover,
+        onCellClick,
+        onCellDragStart,
+        onCellDrag,
+        onCellDragEnd,
+    },
     ref
 ) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const rafRef = useRef<number>(0);
+    const isDraggingRef = useRef(false);
 
     // ── Draw the grid onto the canvas ─────────────────────
     const drawGrid = useCallback(() => {
@@ -138,11 +150,22 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
 
     // ── Mouse handlers ────────────────────────────────────
     const cellFromEvent = useCallback(
-        (e: React.MouseEvent<HTMLCanvasElement>) => {
+        (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
             const grid = gridRef.current;
             if (!grid) return null;
-            const col = Math.floor(e.clientX / grid.cellSize);
-            const row = Math.floor(e.clientY / grid.cellSize);
+
+            let clientX: number, clientY: number;
+            if ("touches" in e) {
+                if (e.touches.length === 0) return null;
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            const col = Math.floor(clientX / grid.cellSize);
+            const row = Math.floor(clientY / grid.cellSize);
             if (!grid.inBounds(col, row)) return null;
             return { col, row };
         },
@@ -152,26 +175,87 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
     const handleMouseMove = useCallback(
         (e: React.MouseEvent<HTMLCanvasElement>) => {
             const cell = cellFromEvent(e);
-            if (cell && onCellHover) onCellHover(cell.col, cell.row);
+            if (!cell) return;
+            if (onCellHover) onCellHover(cell.col, cell.row);
+            if (isDraggingRef.current && onCellDrag) {
+                onCellDrag(cell.col, cell.row);
+            }
         },
-        [cellFromEvent, onCellHover]
+        [cellFromEvent, onCellHover, onCellDrag]
     );
 
-    const handleClick = useCallback(
+    const handleMouseDown = useCallback(
         (e: React.MouseEvent<HTMLCanvasElement>) => {
+            if (e.button !== 0) return; // left-click only
+            isDraggingRef.current = true;
             const cell = cellFromEvent(e);
-            if (cell && onCellClick) onCellClick(cell.col, cell.row);
+            if (cell) {
+                if (onCellClick) onCellClick(cell.col, cell.row);
+                if (onCellDragStart) onCellDragStart(cell.col, cell.row);
+            }
         },
-        [cellFromEvent, onCellClick]
+        [cellFromEvent, onCellClick, onCellDragStart]
+    );
+
+    const handleMouseUp = useCallback(() => {
+        isDraggingRef.current = false;
+        if (onCellDragEnd) onCellDragEnd();
+    }, [onCellDragEnd]);
+
+    const handleMouseLeave = useCallback(() => {
+        isDraggingRef.current = false;
+        if (onCellDragEnd) onCellDragEnd();
+    }, [onCellDragEnd]);
+
+    // ── Touch handlers (mobile / tablet) ──────────────────
+    const handleTouchStart = useCallback(
+        (e: React.TouchEvent<HTMLCanvasElement>) => {
+            e.preventDefault(); // prevent scroll / zoom while drawing
+            isDraggingRef.current = true;
+            const cell = cellFromEvent(e);
+            if (cell) {
+                if (onCellClick) onCellClick(cell.col, cell.row);
+                if (onCellDragStart) onCellDragStart(cell.col, cell.row);
+            }
+        },
+        [cellFromEvent, onCellClick, onCellDragStart]
+    );
+
+    const handleTouchMove = useCallback(
+        (e: React.TouchEvent<HTMLCanvasElement>) => {
+            e.preventDefault();
+            const cell = cellFromEvent(e);
+            if (!cell) return;
+            if (onCellHover) onCellHover(cell.col, cell.row);
+            if (isDraggingRef.current && onCellDrag) {
+                onCellDrag(cell.col, cell.row);
+            }
+        },
+        [cellFromEvent, onCellHover, onCellDrag]
+    );
+
+    const handleTouchEnd = useCallback(
+        (e: React.TouchEvent<HTMLCanvasElement>) => {
+            e.preventDefault();
+            isDraggingRef.current = false;
+            if (onCellDragEnd) onCellDragEnd();
+        },
+        [onCellDragEnd]
     );
 
     return (
         <canvas
             ref={canvasRef}
-            className="fixed inset-0 block"
+            className="fixed inset-0 block touch-none"
             style={{ cursor: "crosshair" }}
             onMouseMove={handleMouseMove}
-            onClick={handleClick}
+            onMouseDown={handleMouseDown}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
         />
     );
 });

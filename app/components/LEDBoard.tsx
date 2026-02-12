@@ -3,13 +3,17 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { GridManager } from "../lib/grid";
 import LEDCanvas, { CanvasHandle } from "./Canvas";
-import { DEFAULT_SETTINGS, BoardSettings, RGB } from "../types";
+import ControlPanel from "./ControlPanel";
+import { DEFAULT_SETTINGS, BoardSettings, RGB, ToolKind } from "../types";
+import { renderTextCentered } from "../lib/font";
 
 export default function LEDBoard() {
     const gridRef = useRef<GridManager | null>(null);
     const canvasHandleRef = useRef<CanvasHandle>(null);
 
     const [settings, setSettings] = useState<BoardSettings>(DEFAULT_SETTINGS);
+    const [activeTool, setActiveTool] = useState<ToolKind>("draw");
+    const [activeColor, setActiveColor] = useState<RGB>([0, 255, 0]);
     const [cellInfo, setCellInfo] = useState<{
         col: number;
         row: number;
@@ -45,33 +49,56 @@ export default function LEDBoard() {
         return () => window.removeEventListener("resize", onResize);
     }, []);
 
-    // ── Hover callback ────────────────────────────────────
-    const handleCellHover = useCallback(
+    // ── Apply tool to a cell ─────────────────────────────
+    const applyTool = useCallback(
         (col: number, row: number) => {
             const grid = gridRef.current;
             if (!grid) return;
-            setCellInfo({ col, row, color: grid.getCell(col, row) });
-        },
-        []
-    );
 
-    // ── Click callback (paint a sample pixel for testing) ─
-    const handleCellClick = useCallback(
-        (col: number, row: number) => {
-            const grid = gridRef.current;
-            if (!grid) return;
-            // For Phase 1 demo: paint clicked cell green
-            grid.setCell(col, row, [0, 255, 0]);
+            switch (activeTool) {
+                case "draw":
+                    grid.setCell(col, row, activeColor);
+                    break;
+                case "erase":
+                    grid.setCell(col, row, settings.backgroundColor);
+                    break;
+                case "fill":
+                    grid.floodFill(col, row, activeColor);
+                    break;
+            }
             canvasHandleRef.current?.redraw();
         },
-        []
+        [activeTool, activeColor, settings.backgroundColor],
+    );
+
+    // ── Hover callback ────────────────────────────────────
+    const handleCellHover = useCallback((col: number, row: number) => {
+        const grid = gridRef.current;
+        if (!grid) return;
+        setCellInfo({ col, row, color: grid.getCell(col, row) });
+    }, []);
+
+    // ── Click callback (applies tool once) ─────────────
+    const handleCellClick = useCallback(
+        (col: number, row: number) => {
+            applyTool(col, row);
+        },
+        [applyTool],
+    );
+
+    // ── Drag callbacks (for draw/erase continuous strokes)
+    const handleCellDrag = useCallback(
+        (col: number, row: number) => {
+            if (activeTool === "fill") return; // fill only on click
+            applyTool(col, row);
+        },
+        [activeTool, applyTool],
     );
 
     // ── Toggle grid lines ─────────────────────────────────
     const toggleGrid = useCallback(() => {
         setSettings((prev) => {
             const next = { ...prev, showGrid: !prev.showGrid };
-            // Redraw after state update
             setTimeout(() => canvasHandleRef.current?.redraw(), 0);
             return next;
         });
@@ -83,6 +110,29 @@ export default function LEDBoard() {
         canvasHandleRef.current?.redraw();
     }, []);
 
+    // ── Apply a pattern ───────────────────────────────────
+    const handleApplyPattern = useCallback(
+        (fn: (cols: number, rows: number, data: Uint8ClampedArray) => void) => {
+            const grid = gridRef.current;
+            if (!grid) return;
+            grid.clear();
+            fn(grid.cols, grid.rows, grid.data);
+            canvasHandleRef.current?.redraw();
+        },
+        [],
+    );
+
+    // ── Render pixel text ─────────────────────────────────
+    const handleRenderText = useCallback(
+        (text: string, color: RGB, scale: number = 1) => {
+            const grid = gridRef.current;
+            if (!grid) return;
+            renderTextCentered(text, grid.cols, grid.rows, grid.data, color, scale);
+            canvasHandleRef.current?.redraw();
+        },
+        [],
+    );
+
     return (
         <>
             {/* Canvas layer */}
@@ -92,46 +142,23 @@ export default function LEDBoard() {
                 settings={settings}
                 onCellHover={handleCellHover}
                 onCellClick={handleCellClick}
+                onCellDrag={handleCellDrag}
             />
 
-            {/* HUD overlay — grid info + cell info */}
-            <div className="fixed top-4 left-4 z-10 flex flex-col gap-2 rounded-lg bg-black/70 px-4 py-3 text-xs text-white font-mono backdrop-blur-sm select-none pointer-events-auto">
-                <div className="text-sm font-semibold tracking-wide text-green-400">
-                    LED Board
-                </div>
-                <div>
-                    Grid: {gridDims.cols} × {gridDims.rows} ({gridDims.cols * gridDims.rows} cells)
-                </div>
-                <div>Cell size: {settings.cellSize}px</div>
-                {cellInfo && (
-                    <div>
-                        Hover: ({cellInfo.col}, {cellInfo.row}){" "}
-                        <span
-                            className="inline-block h-3 w-3 rounded-sm border border-white/30 align-middle"
-                            style={{
-                                backgroundColor: `rgb(${cellInfo.color[0]},${cellInfo.color[1]},${cellInfo.color[2]})`,
-                            }}
-                        />
-                    </div>
-                )}
-
-                {/* Controls */}
-                <div className="mt-2 flex gap-2">
-                    <button
-                        onClick={toggleGrid}
-                        className="rounded bg-white/10 px-2 py-1 text-xs hover:bg-white/20 transition"
-                    >
-                        {settings.showGrid ? "Hide Grid" : "Show Grid"}
-                    </button>
-                    <button
-                        onClick={clearBoard}
-                        className="rounded bg-red-600/60 px-2 py-1 text-xs hover:bg-red-500/80 transition"
-                    >
-                        Clear
-                    </button>
-                </div>
-                <div className="text-white/40 text-[10px]">Click cells to paint</div>
-            </div>
+            {/* Control Panel */}
+            <ControlPanel
+                activeTool={activeTool}
+                activeColor={activeColor}
+                settings={settings}
+                gridDims={gridDims}
+                cellInfo={cellInfo}
+                onToolChange={setActiveTool}
+                onColorChange={setActiveColor}
+                onToggleGrid={toggleGrid}
+                onClear={clearBoard}
+                onApplyPattern={handleApplyPattern}
+                onRenderText={handleRenderText}
+            />
         </>
     );
 }

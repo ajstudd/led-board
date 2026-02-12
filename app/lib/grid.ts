@@ -1,4 +1,5 @@
 import { RGB, GridDimensions, DEFAULT_CELL_SIZE } from "../types";
+import { rgbEqual } from "./utils";
 
 /**
  * GridManager — manages the LED grid data model.
@@ -134,5 +135,30 @@ export class GridManager {
   /** Clone the current data buffer */
   cloneData(): Uint8ClampedArray {
     return new Uint8ClampedArray(this._data);
+  }
+
+  /** Flood-fill from (col, row) with the given colour */
+  floodFill(col: number, row: number, fillColor: RGB): void {
+    if (!this.inBounds(col, row)) return;
+
+    const targetColor = this.getCell(col, row);
+    if (rgbEqual(targetColor, fillColor)) return;
+
+    const stack: [number, number][] = [[col, row]];
+
+    while (stack.length > 0) {
+      const [c, r] = stack.pop()!;
+      if (!this.inBounds(c, r)) continue;
+
+      const current = this.getCell(c, r);
+      if (!rgbEqual(current, targetColor)) continue;
+
+      this.setCell(c, r, fillColor);
+
+      stack.push([c + 1, r]);
+      stack.push([c - 1, r]);
+      stack.push([c, r + 1]);
+      stack.push([c, r - 1]);
+    }
   }
 }
