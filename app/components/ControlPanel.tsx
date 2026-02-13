@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { ToolKind, RGB, BoardSettings } from "../types";
+import { ToolKind, RGB, BoardSettings, AnimationConfig } from "../types";
 import ColorPicker from "./ColorPicker";
 import PatternSelector from "./PatternSelector";
+import AnimationPanel from "./AnimationPanel";
+import { AnimationState } from "../lib/animation";
 
 interface ControlPanelProps {
     activeTool: ToolKind;
@@ -17,6 +19,16 @@ interface ControlPanelProps {
     onClear: () => void;
     onApplyPattern: (fn: (cols: number, rows: number, data: Uint8ClampedArray) => void) => void;
     onRenderText: (text: string, color: RGB, scale?: number) => void;
+    // Animation
+    animState: AnimationState;
+    currentAnim: AnimationConfig | null;
+    animFps: number;
+    animFrame: number;
+    onSelectAnimation: (anim: AnimationConfig) => void;
+    onAnimPlay: () => void;
+    onAnimPause: () => void;
+    onAnimStop: () => void;
+    onAnimFpsChange: (fps: number) => void;
 }
 
 const TOOLS: { kind: ToolKind; label: string; shortLabel: string }[] = [
@@ -64,6 +76,15 @@ export default function ControlPanel({
     onClear,
     onApplyPattern,
     onRenderText,
+    animState,
+    currentAnim,
+    animFps,
+    animFrame,
+    onSelectAnimation,
+    onAnimPlay,
+    onAnimPause,
+    onAnimStop,
+    onAnimFpsChange,
 }: ControlPanelProps) {
     const [collapsed, setCollapsed] = useState(false);
 
@@ -154,6 +175,22 @@ export default function ControlPanel({
                     onApplyPattern={onApplyPattern}
                     onRenderText={onRenderText}
                     activeColor={activeColor}
+                />
+
+                {/* Separator */}
+                <div className="h-px bg-white/10" />
+
+                {/* Animations */}
+                <AnimationPanel
+                    animState={animState}
+                    currentAnim={currentAnim}
+                    fps={animFps}
+                    frame={animFrame}
+                    onSelectAnimation={onSelectAnimation}
+                    onPlay={onAnimPlay}
+                    onPause={onAnimPause}
+                    onStop={onAnimStop}
+                    onFpsChange={onAnimFpsChange}
                 />
 
                 {/* Separator */}

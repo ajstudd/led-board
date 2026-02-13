@@ -4,7 +4,7 @@ import { RGB } from "../types";
  * 5×7 bitmap font — each character is represented by 7 rows of 5 bits.
  * A `1` means the pixel is on.
  */
-const FONT: Record<string, number[]> = {
+export const FONT: Record<string, number[]> = {
   A: [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
   B: [0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110],
   C: [0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
