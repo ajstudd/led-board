@@ -264,18 +264,16 @@ export default function LEDBoard() {
 
             if (snapshotRef.current) {
                 // Render text into the content buffer
-                const before = new Uint8ClampedArray(snapshotRef.current);
                 renderTextCentered(text, grid.cols, grid.rows, snapshotRef.current, color, scale);
                 captureSnapshot(snapshotRef.current);
-                strokeRecorder.recordBulk(before, snapshotRef.current);
+                strokeRecorder.recordText(text, grid.cols, grid.rows, color, scale, true);
                 if (animRef.current?.state !== "playing") {
                     grid.loadData(snapshotRef.current);
                     canvasHandleRef.current?.redraw();
                 }
             } else {
-                const before = grid.cloneData();
                 renderTextCentered(text, grid.cols, grid.rows, grid.data, color, scale);
-                strokeRecorder.recordBulk(before, grid.data);
+                strokeRecorder.recordText(text, grid.cols, grid.rows, color, scale, true);
                 canvasHandleRef.current?.redraw();
             }
         },

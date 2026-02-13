@@ -60,3 +60,33 @@ canvas {
 .thin-scrollbar {
   overflow-y: overlay;
 }
+
+/* ── Panel slide-in animation ──────────────────────── */
+@keyframes panel-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.panel-slide-in {
+  animation: panel-slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Panel tab (collapsed ">" button) ──────────────── */
+@keyframes tab-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.panel-tab-container {
+  animation: tab-fade-in 0.2s ease-out both;
+}

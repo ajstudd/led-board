@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { ToolKind, RGB, BoardSettings, AnimationConfig } from "../types";
 import ColorPicker from "./ColorPicker";
 import PatternSelector from "./PatternSelector";
@@ -88,24 +88,75 @@ export default function ControlPanel({
 }: ControlPanelProps) {
     const [collapsed, setCollapsed] = useState(false);
 
-    // ── Collapsed state: just a small toggle button ──────
+    // ── Swipe-to-open on mobile ──────────────────────────
+    const touchStartX = useRef(0);
+    const touchStartY = useRef(0);
+
+    const handleTouchStart = useCallback((e: TouchEvent) => {
+        // Only track swipes starting from the left edge (first 30px)
+        if (e.touches[0].clientX < 30) {
+            touchStartX.current = e.touches[0].clientX;
+            touchStartY.current = e.touches[0].clientY;
+        } else {
+            touchStartX.current = -1;
+        }
+    }, []);
+
+    const handleTouchEnd = useCallback(
+        (e: TouchEvent) => {
+            if (touchStartX.current < 0 || !collapsed) return;
+            const dx = e.changedTouches[0].clientX - touchStartX.current;
+            const dy = Math.abs(e.changedTouches[0].clientY - touchStartY.current);
+            // Swipe right at least 40px and mostly horizontal
+            if (dx > 40 && dy < dx) {
+                setCollapsed(false);
+            }
+        },
+        [collapsed],
+    );
+
+    useEffect(() => {
+        window.addEventListener("touchstart", handleTouchStart, { passive: true });
+        window.addEventListener("touchend", handleTouchEnd, { passive: true });
+        return () => {
+            window.removeEventListener("touchstart", handleTouchStart);
+            window.removeEventListener("touchend", handleTouchEnd);
+        };
+    }, [handleTouchStart, handleTouchEnd]);
+
+    // ── Collapsed state: just a tiny ">" arrow on edge ───
     if (collapsed) {
         return (
-            <button
-                onClick={() => setCollapsed(false)}
-                className="fixed top-2 left-2 sm:top-4 sm:left-4 z-10 flex items-center justify-center rounded-lg bg-black/80 px-3 py-2.5 sm:py-2 text-xs text-green-400 font-mono backdrop-blur-md shadow-lg border border-white/5 hover:bg-black/90 transition pointer-events-auto select-none min-h-11 sm:min-h-0"
-                title="Show panel"
-            >
-                <svg width={14} height={14} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                    <path d="M4 6l4 4 4-4" />
-                </svg>
-                <span className="ml-1.5">LED Board</span>
-            </button>
+            <div className="panel-tab-container fixed top-1/2 -translate-y-1/2 left-0 z-10 pointer-events-auto select-none">
+                <button
+                    onClick={() => setCollapsed(false)}
+                    className="panel-tab group relative flex items-center justify-center w-6 h-14 sm:w-5 sm:h-12 cursor-pointer"
+                    title="Open panel"
+                    aria-label="Open panel"
+                >
+                    {/* Curved backdrop — visible on hover / focus */}
+                    <span className="absolute inset-0 rounded-r-xl bg-white/0 group-hover:bg-white/10 group-focus-visible:bg-white/10 transition-all duration-200 backdrop-blur-none group-hover:backdrop-blur-md group-focus-visible:backdrop-blur-md shadow-none group-hover:shadow-lg group-hover:shadow-black/30 border-y border-r border-transparent group-hover:border-white/10" />
+                    {/* Arrow */}
+                    <svg
+                        className="relative z-1 text-white/30 group-hover:text-green-400 transition-colors duration-200"
+                        width={12}
+                        height={12}
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                    >
+                        <path d="M6 3l5 5-5 5" />
+                    </svg>
+                </button>
+            </div>
         );
     }
 
     return (
-        <div className="fixed top-2 left-2 sm:top-4 sm:left-4 z-10 flex flex-col rounded-xl bg-black/80 text-xs text-white font-mono backdrop-blur-md select-none pointer-events-auto shadow-lg shadow-black/40 border border-white/5 w-[calc(100vw-1rem)] xs:w-56 sm:w-56 max-w-[16rem] max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] overflow-hidden">
+        <div className="panel-slide-in fixed top-2 left-2 sm:top-4 sm:left-4 z-10 flex flex-col rounded-xl bg-black/80 text-xs text-white font-mono backdrop-blur-md select-none pointer-events-auto shadow-lg shadow-black/40 border border-white/5 w-[calc(100vw-1rem)] xs:w-56 sm:w-56 max-w-[16rem] max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] overflow-hidden">
             {/* Header — always visible, not scrollable */}
             <div className="flex items-center justify-between px-3 sm:px-4 pt-2 sm:pt-3 pb-1.5 sm:pb-2 shrink-0">
                 <div className="text-sm font-semibold tracking-wide text-green-400">

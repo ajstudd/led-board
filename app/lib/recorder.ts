@@ -1,3 +1,11 @@
+import {
+  FONT,
+  CHAR_WIDTH,
+  CHAR_HEIGHT,
+  CHAR_SPACING,
+  measureText,
+} from "./font";
+
 /**
  * StrokeRecorder — records every pixel change the user makes
  * in drawing order, so the "Replay Draw" animation can play
@@ -76,6 +84,79 @@ class StrokeRecorder {
   /** Clear all recorded data */
   clear(): void {
     this._entries = [];
+  }
+
+  /**
+   * Record text rendering character-by-character in typing order.
+   * Each character's lit pixels are grouped together so replay
+   * shows letters appearing one at a time, left to right.
+   */
+  recordText(
+    text: string,
+    cols: number,
+    rows: number,
+    color: [number, number, number],
+    scale: number = 1,
+    centered: boolean = true,
+  ): void {
+    if (!this._recording) return;
+
+    const charW = CHAR_WIDTH * scale;
+    const charH = CHAR_HEIGHT * scale;
+    const textWidth = measureText(text, scale);
+
+    let startCol: number;
+    let startRow: number;
+    if (centered) {
+      startCol = Math.max(0, Math.floor((cols - textWidth) / 2));
+      startRow = Math.max(0, Math.floor((rows - charH) / 2));
+    } else {
+      startCol = 0;
+      startRow = 0;
+    }
+
+    let curCol = startCol;
+    let curRow = startRow;
+
+    for (const ch of text) {
+      // Wrap to next line if we'd overflow
+      if (curCol + charW > cols) {
+        curCol = startCol;
+        curRow += charH + scale;
+      }
+      // Stop if we'd overflow vertically
+      if (curRow + charH > rows) break;
+
+      const glyph = FONT[ch.toUpperCase()] ?? FONT["?"];
+      if (glyph) {
+        // Record each lit pixel of this character
+        for (let gr = 0; gr < CHAR_HEIGHT; gr++) {
+          const rowBits = glyph[gr];
+          for (let gc = 0; gc < CHAR_WIDTH; gc++) {
+            const bit = (rowBits >> (CHAR_WIDTH - 1 - gc)) & 1;
+            if (bit) {
+              for (let sy = 0; sy < scale; sy++) {
+                for (let sx = 0; sx < scale; sx++) {
+                  const c = curCol + gc * scale + sx;
+                  const r = curRow + gr * scale + sy;
+                  if (c >= 0 && c < cols && r >= 0 && r < rows) {
+                    const idx = (r * cols + c) * 3;
+                    this._entries.push({
+                      idx,
+                      r: color[0],
+                      g: color[1],
+                      b: color[2],
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      curCol += (CHAR_WIDTH + CHAR_SPACING) * scale;
+    }
   }
 }
 
