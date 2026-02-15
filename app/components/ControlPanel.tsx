@@ -17,6 +17,8 @@ interface ControlPanelProps {
     onColorChange: (color: RGB) => void;
     onToggleGrid: () => void;
     onClear: () => void;
+    onUndo: () => void;
+    canUndo: boolean;
     onApplyPattern: (fn: (cols: number, rows: number, data: Uint8ClampedArray) => void) => void;
     onRenderText: (text: string, color: RGB, scale?: number) => void;
     // Animation
@@ -74,6 +76,8 @@ export default function ControlPanel({
     onColorChange,
     onToggleGrid,
     onClear,
+    onUndo,
+    canUndo,
     onApplyPattern,
     onRenderText,
     animState,
@@ -248,7 +252,16 @@ export default function ControlPanel({
                 <div className="h-px bg-white/10" />
 
                 {/* Actions */}
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
+                    <button
+                        onClick={onUndo}
+                        disabled={!canUndo}
+                        className={`rounded bg-white/10 px-2 py-2 sm:py-1.5 text-xs transition min-h-9 sm:min-h-0 ${canUndo ? "hover:bg-white/20" : "opacity-30 cursor-not-allowed"
+                            }`}
+                        title="Undo (Ctrl+Z)"
+                    >
+                        ↩ Undo
+                    </button>
                     <button
                         onClick={onToggleGrid}
                         className="flex-1 rounded bg-white/10 px-2 py-2 sm:py-1.5 text-xs hover:bg-white/20 transition min-h-9 sm:min-h-0"

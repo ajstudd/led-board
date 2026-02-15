@@ -105,6 +105,11 @@ export class GridManager {
   resizePreserve(viewportWidth: number, viewportHeight: number): void {
     const newCols = Math.floor(viewportWidth / this._cellSize);
     const newRows = Math.floor(viewportHeight / this._cellSize);
+
+    // No-op if dimensions haven't changed (avoids creating a new data array
+    // that would silently invalidate external references like AnimationManager).
+    if (newCols === this._cols && newRows === this._rows) return;
+
     const newData = new Uint8ClampedArray(newCols * newRows * 3);
 
     const copyRows = Math.min(this._rows, newRows);

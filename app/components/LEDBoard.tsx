@@ -9,6 +9,13 @@ import { renderTextCentered } from "../lib/font";
 import { AnimationManager, AnimationState } from "../lib/animation";
 import { captureSnapshot, updateSnapshotPixel } from "../lib/animations";
 import { strokeRecorder } from "../lib/recorder";
+import { uint8ToBase64, base64ToUint8 } from "../lib/utils";
+
+const STORAGE_KEY_COLOR = "led-board-color";
+const STORAGE_KEY_TOOL = "led-board-tool";
+const STORAGE_KEY_GRID = "led-board-grid";
+const STORAGE_KEY_SHOW_GRID = "led-board-showGrid";
+const MAX_UNDO = 50;
 
 export default function LEDBoard() {
     const gridRef = useRef<GridManager | null>(null);
@@ -35,15 +42,43 @@ export default function LEDBoard() {
     const [animFrame, setAnimFrame] = useState(0);
     const snapshotRef = useRef<Uint8ClampedArray | null>(null);
 
+    // ── Undo stack ──────────────────────────────────────
+    const undoStackRef = useRef<Uint8ClampedArray[]>([]);
+    const strokeActiveRef = useRef(false);
+    const [canUndo, setCanUndo] = useState(false);
+
     // ── Initialise grid on mount ──────────────────────────
     useEffect(() => {
         const w = window.innerWidth;
         const h = window.innerHeight;
         gridRef.current = new GridManager(w, h, settings.cellSize);
-        setGridDims({
-            cols: gridRef.current.cols,
-            rows: gridRef.current.rows,
-        });
+
+        // Load saved grid data from localStorage
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY_GRID);
+            if (saved) {
+                const { data: b64, cols: savedCols, rows: savedRows } = JSON.parse(saved);
+                const savedData = base64ToUint8(b64);
+                const grid = gridRef.current;
+                const copyCols = Math.min(savedCols, grid.cols);
+                const copyRows = Math.min(savedRows, grid.rows);
+                for (let r = 0; r < copyRows; r++) {
+                    for (let c = 0; c < copyCols; c++) {
+                        const si = (r * savedCols + c) * 3;
+                        const di = (r * grid.cols + c) * 3;
+                        grid.data[di] = savedData[si];
+                        grid.data[di + 1] = savedData[si + 1];
+                        grid.data[di + 2] = savedData[si + 2];
+                    }
+                }
+            }
+        } catch { /* ignore corrupted data */ }
+
+        const dims = { cols: gridRef.current.cols, rows: gridRef.current.rows };
+        setGridDims(dims);
+
+        // Redraw after loading (canvas effect may have run before data was loaded)
+        requestAnimationFrame(() => canvasHandleRef.current?.redraw());
     }, [settings.cellSize]);
 
     // ── Initialise animation manager ─────────────────────
@@ -71,27 +106,140 @@ export default function LEDBoard() {
         return () => clearInterval(id);
     }, [animState]);
 
-    // ── Update dims on resize ─────────────────────────────
+    // ── Load saved preferences from localStorage ─────────
     useEffect(() => {
-        const onResize = () => {
-            if (gridRef.current) {
-                setGridDims({
-                    cols: gridRef.current.cols,
-                    rows: gridRef.current.rows,
-                });
-                // Keep animation manager in sync with resized grid
-                if (animRef.current) {
-                    animRef.current.updateGrid(
-                        gridRef.current.cols,
-                        gridRef.current.rows,
-                        gridRef.current.data,
-                    );
+        // Deferred to avoid React compiler warning about sync setState in effect
+        queueMicrotask(() => {
+            try {
+                const savedColor = localStorage.getItem(STORAGE_KEY_COLOR);
+                if (savedColor) setActiveColor(JSON.parse(savedColor));
+                const savedTool = localStorage.getItem(STORAGE_KEY_TOOL);
+                if (savedTool && ["draw", "erase", "fill"].includes(savedTool)) {
+                    setActiveTool(savedTool as ToolKind);
                 }
-            }
-        };
-        window.addEventListener("resize", onResize);
-        return () => window.removeEventListener("resize", onResize);
+                const savedShowGrid = localStorage.getItem(STORAGE_KEY_SHOW_GRID);
+                if (savedShowGrid !== null) {
+                    setSettings((prev) => ({ ...prev, showGrid: savedShowGrid === "true" }));
+                }
+            } catch { /* ignore */ }
+        });
     }, []);
+
+    // ── Save preferences to localStorage ──────────────────
+    useEffect(() => {
+        try { localStorage.setItem(STORAGE_KEY_COLOR, JSON.stringify(activeColor)); } catch { }
+    }, [activeColor]);
+
+    useEffect(() => {
+        try { localStorage.setItem(STORAGE_KEY_TOOL, activeTool); } catch { }
+    }, [activeTool]);
+
+    useEffect(() => {
+        try { localStorage.setItem(STORAGE_KEY_SHOW_GRID, String(settings.showGrid)); } catch { }
+    }, [settings.showGrid]);
+
+    // ── Save grid data to localStorage periodically + on unload
+    const saveGridToStorage = useCallback(() => {
+        const grid = gridRef.current;
+        if (!grid) return;
+        const data = snapshotRef.current || grid.data;
+        try {
+            localStorage.setItem(STORAGE_KEY_GRID, JSON.stringify({
+                data: uint8ToBase64(data),
+                cols: grid.cols,
+                rows: grid.rows,
+            }));
+        } catch { }
+    }, []);
+
+    useEffect(() => {
+        window.addEventListener("beforeunload", saveGridToStorage);
+        const interval = setInterval(saveGridToStorage, 5000);
+        return () => {
+            window.removeEventListener("beforeunload", saveGridToStorage);
+            clearInterval(interval);
+        };
+    }, [saveGridToStorage]);
+
+    // ── Handle grid resize (called from Canvas after resizePreserve) ──
+    const handleGridResize = useCallback(
+        (oldCols: number, oldRows: number, newCols: number, newRows: number) => {
+            const grid = gridRef.current;
+            if (!grid) return;
+
+            // Resize animation snapshot if active
+            if (snapshotRef.current) {
+                const newSnap = new Uint8ClampedArray(newCols * newRows * 3);
+                const copyCols = Math.min(oldCols, newCols);
+                const copyRows = Math.min(oldRows, newRows);
+                for (let r = 0; r < copyRows; r++) {
+                    for (let c = 0; c < copyCols; c++) {
+                        const si = (r * oldCols + c) * 3;
+                        const di = (r * newCols + c) * 3;
+                        newSnap[di] = snapshotRef.current[si];
+                        newSnap[di + 1] = snapshotRef.current[si + 1];
+                        newSnap[di + 2] = snapshotRef.current[si + 2];
+                    }
+                }
+                snapshotRef.current = newSnap;
+                captureSnapshot(snapshotRef.current);
+            }
+
+            // Clear undo stack on resize (data sizes changed)
+            undoStackRef.current = [];
+            setCanUndo(false);
+
+            setGridDims({ cols: newCols, rows: newRows });
+
+            // Keep animation manager in sync with resized grid
+            if (animRef.current) {
+                animRef.current.updateGrid(newCols, newRows, grid.data);
+            }
+        },
+        [],
+    );
+
+    // ── Undo helpers ───────────────────────────────────
+    const pushUndo = useCallback(() => {
+        const grid = gridRef.current;
+        if (!grid) return;
+        const data = snapshotRef.current
+            ? new Uint8ClampedArray(snapshotRef.current)
+            : grid.cloneData();
+        undoStackRef.current.push(data);
+        if (undoStackRef.current.length > MAX_UNDO) {
+            undoStackRef.current.shift();
+        }
+        setCanUndo(true);
+    }, []);
+
+    const handleUndo = useCallback(() => {
+        const stack = undoStackRef.current;
+        if (stack.length === 0) return;
+        const prevData = stack.pop()!;
+        setCanUndo(stack.length > 0);
+
+        const grid = gridRef.current;
+        if (!grid) return;
+
+        if (snapshotRef.current) {
+            // Animation mode — restore snapshot
+            if (prevData.length === snapshotRef.current.length) {
+                snapshotRef.current.set(prevData);
+            } else {
+                snapshotRef.current = new Uint8ClampedArray(prevData);
+            }
+            captureSnapshot(snapshotRef.current);
+            if (animRef.current?.state !== "playing") {
+                grid.loadData(snapshotRef.current);
+                canvasHandleRef.current?.redraw();
+            }
+        } else {
+            grid.loadData(prevData);
+            canvasHandleRef.current?.redraw();
+        }
+        saveGridToStorage();
+    }, [saveGridToStorage]);
 
     // ── Apply tool to a cell ─────────────────────────────
     const applyTool = useCallback(
@@ -112,7 +260,7 @@ export default function LEDBoard() {
                         snap[idx + 1] = activeColor[1];
                         snap[idx + 2] = activeColor[2];
                         updateSnapshotPixel(idx, activeColor[0], activeColor[1], activeColor[2]);
-                        strokeRecorder.record(idx, activeColor[0], activeColor[1], activeColor[2]);
+                        strokeRecorder.record(col, row, activeColor[0], activeColor[1], activeColor[2]);
                         break;
                     case "erase":
                         snap[idx] = settings.backgroundColor[0];
@@ -125,7 +273,7 @@ export default function LEDBoard() {
                             settings.backgroundColor[2],
                         );
                         strokeRecorder.record(
-                            idx,
+                            col, row,
                             settings.backgroundColor[0],
                             settings.backgroundColor[1],
                             settings.backgroundColor[2],
@@ -138,7 +286,7 @@ export default function LEDBoard() {
                         grid.floodFill(col, row, activeColor);
                         snapshotRef.current = grid.cloneData();
                         captureSnapshot(snapshotRef.current);
-                        strokeRecorder.recordBulk(before, snapshotRef.current);
+                        strokeRecorder.recordBulk(before, snapshotRef.current, grid.cols);
                         break;
                     }
                 }
@@ -150,16 +298,15 @@ export default function LEDBoard() {
                 }
             } else {
                 // Normal mode — no animation active
-                const idx = (row * grid.cols + col) * 3;
                 switch (activeTool) {
                     case "draw":
                         grid.setCell(col, row, activeColor);
-                        strokeRecorder.record(idx, activeColor[0], activeColor[1], activeColor[2]);
+                        strokeRecorder.record(col, row, activeColor[0], activeColor[1], activeColor[2]);
                         break;
                     case "erase":
                         grid.setCell(col, row, settings.backgroundColor);
                         strokeRecorder.record(
-                            idx,
+                            col, row,
                             settings.backgroundColor[0],
                             settings.backgroundColor[1],
                             settings.backgroundColor[2],
@@ -168,7 +315,7 @@ export default function LEDBoard() {
                     case "fill": {
                         const before = grid.cloneData();
                         grid.floodFill(col, row, activeColor);
-                        strokeRecorder.recordBulk(before, grid.data);
+                        strokeRecorder.recordBulk(before, grid.data, grid.cols);
                         break;
                     }
                 }
@@ -188,9 +335,13 @@ export default function LEDBoard() {
     // ── Click callback (applies tool once) ─────────────
     const handleCellClick = useCallback(
         (col: number, row: number) => {
+            if (!strokeActiveRef.current) {
+                pushUndo();
+                strokeActiveRef.current = true;
+            }
             applyTool(col, row);
         },
-        [applyTool],
+        [applyTool, pushUndo],
     );
 
     // ── Drag callbacks (for draw/erase continuous strokes)
@@ -201,6 +352,13 @@ export default function LEDBoard() {
         },
         [activeTool, applyTool],
     );
+
+    const handleDragEnd = useCallback(() => {
+        if (strokeActiveRef.current) {
+            strokeActiveRef.current = false;
+            saveGridToStorage();
+        }
+    }, [saveGridToStorage]);
 
     // ── Toggle grid lines ─────────────────────────────────
     const toggleGrid = useCallback(() => {
@@ -213,6 +371,7 @@ export default function LEDBoard() {
 
     // ── Clear board ────────────────────────────────────────
     const clearBoard = useCallback(() => {
+        pushUndo();
         strokeRecorder.clear();
         if (snapshotRef.current) {
             // Clear the content buffer; animation tick picks up the change
@@ -226,13 +385,15 @@ export default function LEDBoard() {
             gridRef.current?.clear();
             canvasHandleRef.current?.redraw();
         }
-    }, []);
+        saveGridToStorage();
+    }, [pushUndo, saveGridToStorage]);
 
     // ── Apply a pattern ───────────────────────────────────
     const handleApplyPattern = useCallback(
         (fn: (cols: number, rows: number, data: Uint8ClampedArray) => void) => {
             const grid = gridRef.current;
             if (!grid) return;
+            pushUndo();
 
             if (snapshotRef.current) {
                 // Apply pattern to the content buffer
@@ -240,7 +401,7 @@ export default function LEDBoard() {
                 snapshotRef.current.fill(0);
                 fn(grid.cols, grid.rows, snapshotRef.current);
                 captureSnapshot(snapshotRef.current);
-                strokeRecorder.recordBulk(before, snapshotRef.current);
+                strokeRecorder.recordBulk(before, snapshotRef.current, grid.cols);
                 if (animRef.current?.state !== "playing") {
                     grid.loadData(snapshotRef.current);
                     canvasHandleRef.current?.redraw();
@@ -249,11 +410,12 @@ export default function LEDBoard() {
                 const before = grid.cloneData();
                 grid.clear();
                 fn(grid.cols, grid.rows, grid.data);
-                strokeRecorder.recordBulk(before, grid.data);
+                strokeRecorder.recordBulk(before, grid.data, grid.cols);
                 canvasHandleRef.current?.redraw();
             }
+            saveGridToStorage();
         },
-        [],
+        [pushUndo, saveGridToStorage],
     );
 
     // ── Render pixel text ─────────────────────────────────
@@ -261,6 +423,7 @@ export default function LEDBoard() {
         (text: string, color: RGB, scale: number = 1) => {
             const grid = gridRef.current;
             if (!grid) return;
+            pushUndo();
 
             if (snapshotRef.current) {
                 // Render text into the content buffer
@@ -276,8 +439,9 @@ export default function LEDBoard() {
                 strokeRecorder.recordText(text, grid.cols, grid.rows, color, scale, true);
                 canvasHandleRef.current?.redraw();
             }
+            saveGridToStorage();
         },
-        [],
+        [pushUndo, saveGridToStorage],
     );
 
     // ── Animation controls ────────────────────────────────
@@ -328,12 +492,25 @@ export default function LEDBoard() {
         canvasHandleRef.current?.redraw();
         setAnimFrame(0);
         strokeRecorder.resume();
-    }, []);
+        saveGridToStorage();
+    }, [saveGridToStorage]);
 
     const handleAnimFpsChange = useCallback((fps: number) => {
         setAnimFps(fps);
         animRef.current?.setFps(fps);
     }, []);
+
+    // ── Keyboard shortcuts ────────────────────────────
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+                e.preventDefault();
+                handleUndo();
+            }
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [handleUndo]);
 
     return (
         <>
@@ -345,6 +522,8 @@ export default function LEDBoard() {
                 onCellHover={handleCellHover}
                 onCellClick={handleCellClick}
                 onCellDrag={handleCellDrag}
+                onCellDragEnd={handleDragEnd}
+                onGridResize={handleGridResize}
             />
 
             {/* Control Panel */}
@@ -358,6 +537,8 @@ export default function LEDBoard() {
                 onColorChange={setActiveColor}
                 onToggleGrid={toggleGrid}
                 onClear={clearBoard}
+                onUndo={handleUndo}
+                canUndo={canUndo}
                 onApplyPattern={handleApplyPattern}
                 onRenderText={handleRenderText}
                 // Animation props

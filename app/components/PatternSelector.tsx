@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { PATTERNS, PatternEntry } from "../lib/patterns";
+import { PATTERNS, PatternEntry, gradient } from "../lib/patterns";
 import { RGB } from "../types";
+import { rgbToHex, hexToRgb } from "../lib/utils";
 
 // Tiny canvas to generate pattern thumbnails
 function generateThumbnail(
@@ -48,6 +49,18 @@ export default function PatternSelector({
     const [thumbnails, setThumbnails] = useState<string[]>([]);
     const generated = useRef(false);
 
+    // ── Gradient submenu state ─────────────────────────────
+    const [gradientOpen, setGradientOpen] = useState(false);
+    const [gradStart, setGradStart] = useState<RGB>([255, 0, 0]);
+    const [gradEnd, setGradEnd] = useState<RGB>([0, 0, 255]);
+    const [gradDir, setGradDir] = useState<"horizontal" | "vertical" | "diagonal">("horizontal");
+
+    const handleApplyGradient = useCallback(() => {
+        onApplyPattern((cols, rows, data) =>
+            gradient(cols, rows, data, gradStart, gradEnd, gradDir)
+        );
+    }, [onApplyPattern, gradStart, gradEnd, gradDir]);
+
     // Generate thumbnails once on first expand
     useEffect(() => {
         if (expanded && !generated.current) {
@@ -90,30 +103,101 @@ export default function PatternSelector({
                 <div className="mt-2 flex flex-col gap-3">
                     {/* Pattern grid */}
                     <div className="grid grid-cols-2 xs:grid-cols-3 gap-1.5">
-                        {PATTERNS.map((p, i) => (
-                            <button
-                                key={p.name}
-                                onClick={() => onApplyPattern(p.apply)}
-                                className="group relative flex flex-col items-center rounded bg-white/5 p-1 hover:bg-white/15 transition"
-                                title={p.name}
-                            >
-                                {thumbnails[i] ? (
-                                    /* eslint-disable-next-line @next/next/no-img-element */
-                                    <img
-                                        src={thumbnails[i]}
-                                        alt={p.name}
-                                        className="h-7 sm:h-9 w-full rounded-sm object-cover"
-                                        draggable={false}
-                                    />
-                                ) : (
-                                    <div className="h-7 sm:h-9 w-full rounded-sm bg-white/5 animate-pulse" />
-                                )}
-                                <span className="mt-0.5 text-[9px] text-white/50 group-hover:text-white/80 truncate w-full text-center">
-                                    {p.name}
-                                </span>
-                            </button>
-                        ))}
+                        {PATTERNS.map((p, i) => {
+                            const isGrad = p.name === "Gradient";
+                            return (
+                                <button
+                                    key={p.name}
+                                    onClick={() => {
+                                        if (isGrad) {
+                                            setGradientOpen((v) => !v);
+                                        } else {
+                                            setGradientOpen(false);
+                                            onApplyPattern(p.apply);
+                                        }
+                                    }}
+                                    className={`group relative flex flex-col items-center rounded p-1 transition ${isGrad && gradientOpen
+                                            ? "bg-green-500/20 ring-1 ring-green-500/50"
+                                            : "bg-white/5 hover:bg-white/15"
+                                        }`}
+                                    title={isGrad ? "Click to customise gradient" : p.name}
+                                >
+                                    {thumbnails[i] ? (
+                                        /* eslint-disable-next-line @next/next/no-img-element */
+                                        <img
+                                            src={thumbnails[i]}
+                                            alt={p.name}
+                                            className="h-7 sm:h-9 w-full rounded-sm object-cover"
+                                            draggable={false}
+                                        />
+                                    ) : (
+                                        <div className="h-7 sm:h-9 w-full rounded-sm bg-white/5 animate-pulse" />
+                                    )}
+                                    <span className="mt-0.5 text-[9px] text-white/50 group-hover:text-white/80 truncate w-full text-center">
+                                        {p.name}{isGrad ? (gradientOpen ? " ▾" : " ▸") : ""}
+                                    </span>
+                                </button>
+                            );
+                        })}
                     </div>
+
+                    {/* Gradient submenu – shown inline below grid */}
+                    {gradientOpen && (
+                        <div className="rounded bg-white/5 p-2 flex flex-col gap-2 border border-green-500/20">
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1">
+                                    <label className="text-[9px] text-white/40 block mb-0.5">Start</label>
+                                    <div className="relative">
+                                        <div
+                                            className="h-6 w-full rounded border border-white/20 cursor-pointer"
+                                            style={{ backgroundColor: `rgb(${gradStart[0]},${gradStart[1]},${gradStart[2]})` }}
+                                        />
+                                        <input
+                                            type="color"
+                                            value={rgbToHex(gradStart[0], gradStart[1], gradStart[2])}
+                                            onChange={(e) => setGradStart(hexToRgb(e.target.value))}
+                                            className="absolute inset-0 w-full h-full cursor-pointer opacity-0"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex-1">
+                                    <label className="text-[9px] text-white/40 block mb-0.5">End</label>
+                                    <div className="relative">
+                                        <div
+                                            className="h-6 w-full rounded border border-white/20 cursor-pointer"
+                                            style={{ backgroundColor: `rgb(${gradEnd[0]},${gradEnd[1]},${gradEnd[2]})` }}
+                                        />
+                                        <input
+                                            type="color"
+                                            value={rgbToHex(gradEnd[0], gradEnd[1], gradEnd[2])}
+                                            onChange={(e) => setGradEnd(hexToRgb(e.target.value))}
+                                            className="absolute inset-0 w-full h-full cursor-pointer opacity-0"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="flex gap-1">
+                                {(["horizontal", "vertical", "diagonal"] as const).map((dir) => (
+                                    <button
+                                        key={dir}
+                                        onClick={() => setGradDir(dir)}
+                                        className={`flex-1 rounded px-1 py-1.5 text-[10px] transition min-h-8 sm:min-h-0 ${gradDir === dir
+                                                ? "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
+                                                : "bg-white/5 text-white/70 hover:bg-white/10"
+                                            }`}
+                                    >
+                                        {dir === "horizontal" ? "Horiz" : dir === "vertical" ? "Vert" : "Diag"}
+                                    </button>
+                                ))}
+                            </div>
+                            <button
+                                onClick={handleApplyGradient}
+                                className="w-full rounded bg-green-600/50 px-2 py-1.5 text-xs hover:bg-green-500/70 transition min-h-9 sm:min-h-0"
+                            >
+                                Apply Gradient
+                            </button>
+                        </div>
+                    )}
 
                     {/* Separator */}
                     <div className="h-px bg-white/10" />

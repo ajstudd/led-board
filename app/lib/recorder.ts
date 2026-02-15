@@ -17,8 +17,10 @@ import {
  */
 
 export interface StrokeEntry {
-  /** Flat byte index into the data array (row * cols + col) * 3 */
-  idx: number;
+  /** Grid column (dimension-independent, survives resize) */
+  col: number;
+  /** Grid row (dimension-independent, survives resize) */
+  row: number;
   r: number;
   g: number;
   b: number;
@@ -29,16 +31,19 @@ class StrokeRecorder {
   private _recording = true;
 
   /** Push a single pixel change */
-  record(idx: number, r: number, g: number, b: number): void {
+  record(col: number, row: number, r: number, g: number, b: number): void {
     if (!this._recording) return;
-    this._entries.push({ idx, r, g, b });
+    this._entries.push({ col, row, r, g, b });
   }
 
   /** Push many pixels at once (e.g. flood-fill, pattern, text).
    *  `before` is the data BEFORE the operation, `after` is AFTER.
-   *  Only changed pixels are recorded, preserving visual order
-   *  (top-left to bottom-right scan). */
-  recordBulk(before: Uint8ClampedArray, after: Uint8ClampedArray): void {
+   *  `cols` is the current grid column count (needed to derive col/row). */
+  recordBulk(
+    before: Uint8ClampedArray,
+    after: Uint8ClampedArray,
+    cols: number,
+  ): void {
     if (!this._recording) return;
     for (let i = 0; i < after.length; i += 3) {
       if (
@@ -46,8 +51,10 @@ class StrokeRecorder {
         before[i + 1] !== after[i + 1] ||
         before[i + 2] !== after[i + 2]
       ) {
+        const pixelIdx = i / 3;
         this._entries.push({
-          idx: i,
+          col: pixelIdx % cols,
+          row: Math.floor(pixelIdx / cols),
           r: after[i],
           g: after[i + 1],
           b: after[i + 2],
@@ -140,9 +147,9 @@ class StrokeRecorder {
                   const c = curCol + gc * scale + sx;
                   const r = curRow + gr * scale + sy;
                   if (c >= 0 && c < cols && r >= 0 && r < rows) {
-                    const idx = (r * cols + c) * 3;
                     this._entries.push({
-                      idx,
+                      col: c,
+                      row: r,
                       r: color[0],
                       g: color[1],
                       b: color[2],

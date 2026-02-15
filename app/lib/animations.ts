@@ -452,8 +452,8 @@ function matrixRevealTick(
 let replayEntries: StrokeEntry[] = [];
 
 function replayDrawTick(
-  _cols: number,
-  _rows: number,
+  cols: number,
+  rows: number,
   data: Uint8ClampedArray,
   frame: number,
 ) {
@@ -479,9 +479,12 @@ function replayDrawTick(
   // Apply entries up to the current reveal point
   for (let k = 0; k < revealed; k++) {
     const e = replayEntries[k];
-    data[e.idx] = e.r;
-    data[e.idx + 1] = e.g;
-    data[e.idx + 2] = e.b;
+    if (e.col >= 0 && e.col < cols && e.row >= 0 && e.row < rows) {
+      const idx = (e.row * cols + e.col) * 3;
+      data[idx] = e.r;
+      data[idx + 1] = e.g;
+      data[idx + 2] = e.b;
+    }
   }
 }
 
@@ -490,8 +493,8 @@ function replayDrawTick(
 // ═══════════════════════════════════════════════════════
 
 function replayLoopTick(
-  _cols: number,
-  _rows: number,
+  cols: number,
+  rows: number,
   data: Uint8ClampedArray,
   frame: number,
 ) {
@@ -515,9 +518,12 @@ function replayLoopTick(
   data.fill(0);
   for (let k = 0; k < revealed; k++) {
     const e = replayEntries[k];
-    data[e.idx] = e.r;
-    data[e.idx + 1] = e.g;
-    data[e.idx + 2] = e.b;
+    if (e.col >= 0 && e.col < cols && e.row >= 0 && e.row < rows) {
+      const idx = (e.row * cols + e.col) * 3;
+      data[idx] = e.r;
+      data[idx + 1] = e.g;
+      data[idx + 2] = e.b;
+    }
   }
 }
 
@@ -526,8 +532,8 @@ function replayLoopTick(
 // ═══════════════════════════════════════════════════════
 
 function replayReverseTick(
-  _cols: number,
-  _rows: number,
+  cols: number,
+  rows: number,
   data: Uint8ClampedArray,
   frame: number,
 ) {
@@ -552,9 +558,12 @@ function replayReverseTick(
   // Erase entries from the end backwards
   for (let k = total - 1; k >= total - erased; k--) {
     const e = replayEntries[k];
-    data[e.idx] = 0;
-    data[e.idx + 1] = 0;
-    data[e.idx + 2] = 0;
+    if (e.col >= 0 && e.col < cols && e.row >= 0 && e.row < rows) {
+      const idx = (e.row * cols + e.col) * 3;
+      data[idx] = 0;
+      data[idx + 1] = 0;
+      data[idx + 2] = 0;
+    }
   }
 }
 

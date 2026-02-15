@@ -238,19 +238,9 @@ export const PATTERNS: PatternEntry[] = [
     apply: (c, r, d) => checkerboard(c, r, d),
   },
   {
-    name: "Gradient H",
+    name: "Gradient",
     apply: (c, r, d) =>
       gradient(c, r, d, [255, 0, 0], [0, 0, 255], "horizontal"),
-  },
-  {
-    name: "Gradient V",
-    apply: (c, r, d) =>
-      gradient(c, r, d, [0, 255, 0], [255, 0, 255], "vertical"),
-  },
-  {
-    name: "Gradient D",
-    apply: (c, r, d) =>
-      gradient(c, r, d, [255, 255, 0], [0, 100, 255], "diagonal"),
   },
   {
     name: "Rainbow H",

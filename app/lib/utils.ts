@@ -56,3 +56,24 @@ export function rgbToCss(color: RGB): string {
 export function rgbEqual(a: RGB, b: RGB): boolean {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 }
+
+/** Convert Uint8ClampedArray to base64 string */
+export function uint8ToBase64(data: Uint8ClampedArray): string {
+  let binary = "";
+  const len = data.length;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(data[i]);
+  }
+  return btoa(binary);
+}
+
+/** Convert base64 string to Uint8ClampedArray */
+export function base64ToUint8(base64: string): Uint8ClampedArray {
+  const binary = atob(base64);
+  const len = binary.length;
+  const data = new Uint8ClampedArray(len);
+  for (let i = 0; i < len; i++) {
+    data[i] = binary.charCodeAt(i);
+  }
+  return data;
+}

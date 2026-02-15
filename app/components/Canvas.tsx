@@ -4,6 +4,7 @@ import {
     useRef,
     useEffect,
     useCallback,
+    useState,
     forwardRef,
     useImperativeHandle,
 } from "react";
@@ -23,6 +24,7 @@ interface CanvasProps {
     onCellDragStart?: (col: number, row: number) => void;
     onCellDrag?: (col: number, row: number) => void;
     onCellDragEnd?: () => void;
+    onGridResize?: (oldCols: number, oldRows: number, newCols: number, newRows: number) => void;
 }
 
 const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
@@ -34,12 +36,15 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
         onCellDragStart,
         onCellDrag,
         onCellDragEnd,
+        onGridResize,
     },
     ref
 ) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const rafRef = useRef<number>(0);
     const isDraggingRef = useRef(false);
+    const cursorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [cursorHidden, setCursorHidden] = useState(false);
 
     // ── Draw the grid onto the canvas ─────────────────────
     const drawGrid = useCallback(() => {
@@ -116,6 +121,10 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
         const grid = gridRef.current;
         if (!canvas || !grid) return;
 
+        // Capture old dims BEFORE resize
+        const oldCols = grid.cols;
+        const oldRows = grid.rows;
+
         const w = window.innerWidth;
         const h = window.innerHeight;
 
@@ -124,12 +133,22 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
 
         grid.resizePreserve(w, h);
 
+        const newCols = grid.cols;
+        const newRows = grid.rows;
+
+        // Notify parent so it can resize snapshot / undo stack
+        if ((oldCols !== newCols || oldRows !== newRows) && onGridResize) {
+            onGridResize(oldCols, oldRows, newCols, newRows);
+        }
+
         // Cancel any pending frame, schedule a new one
         cancelAnimationFrame(rafRef.current);
         rafRef.current = requestAnimationFrame(drawGrid);
-    }, [gridRef, drawGrid]);
+    }, [gridRef, drawGrid, onGridResize]);
 
-    // ── Setup: initial draw + resize listener ─────────────
+    // ── Setup: initial draw + resize via ResizeObserver ──
+    // ResizeObserver fires after layout reflow — handles window resize,
+    // fullscreen toggle, DevTools open/close, etc. reliably.
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -141,9 +160,13 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
         // Initial draw
         drawGrid();
 
-        window.addEventListener("resize", handleResize);
+        const observer = new ResizeObserver(() => {
+            handleResize();
+        });
+        observer.observe(document.documentElement);
+
         return () => {
-            window.removeEventListener("resize", handleResize);
+            observer.disconnect();
             cancelAnimationFrame(rafRef.current);
         };
     }, [drawGrid, handleResize]);
@@ -174,6 +197,11 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
 
     const handleMouseMove = useCallback(
         (e: React.MouseEvent<HTMLCanvasElement>) => {
+            // Reset cursor auto-hide timer
+            setCursorHidden(false);
+            if (cursorTimerRef.current) clearTimeout(cursorTimerRef.current);
+            cursorTimerRef.current = setTimeout(() => setCursorHidden(true), 10000);
+
             const cell = cellFromEvent(e);
             if (!cell) return;
             if (onCellHover) onCellHover(cell.col, cell.row);
@@ -247,7 +275,7 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
         <canvas
             ref={canvasRef}
             className="fixed inset-0 block touch-none"
-            style={{ cursor: "crosshair" }}
+            style={{ cursor: cursorHidden ? "none" : "crosshair" }}
             onMouseMove={handleMouseMove}
             onMouseDown={handleMouseDown}
             onMouseUp={handleMouseUp}
