@@ -7,7 +7,7 @@ import ControlPanel from "./ControlPanel";
 import { DEFAULT_SETTINGS, BoardSettings, RGB, ToolKind, AnimationConfig } from "../types";
 import { renderTextCentered } from "../lib/font";
 import { AnimationManager, AnimationState } from "../lib/animation";
-import { captureSnapshot, updateSnapshotPixel } from "../lib/animations";
+import { ANIMATIONS, captureSnapshot, updateSnapshotPixel } from "../lib/animations";
 import { strokeRecorder } from "../lib/recorder";
 import { uint8ToBase64, base64ToUint8 } from "../lib/utils";
 
@@ -15,6 +15,7 @@ const STORAGE_KEY_COLOR = "tenix-color";
 const STORAGE_KEY_TOOL = "tenix-tool";
 const STORAGE_KEY_GRID = "tenix-grid";
 const STORAGE_KEY_SHOW_GRID = "tenix-showGrid";
+const STORAGE_KEY_ANIM = "tenix-anim";
 const MAX_UNDO = 50;
 
 export default function LEDBoard() {
@@ -123,6 +124,28 @@ export default function LEDBoard() {
                 const savedShowGrid = localStorage.getItem(STORAGE_KEY_SHOW_GRID);
                 if (savedShowGrid !== null) {
                     setSettings((prev) => ({ ...prev, showGrid: savedShowGrid === "true" }));
+                }
+                const savedAnim = localStorage.getItem(STORAGE_KEY_ANIM);
+                if (savedAnim) {
+                    const match = ANIMATIONS.find((a) => a.name === savedAnim);
+                    if (match) {
+                        // Defer animation start until grid + AnimationManager are ready
+                        requestAnimationFrame(() => {
+                            const grid = gridRef.current;
+                            const mgr = animRef.current;
+                            if (!grid || !mgr) return;
+                            strokeRecorder.pause();
+                            if (!snapshotRef.current) {
+                                snapshotRef.current = grid.cloneData();
+                            }
+                            captureSnapshot(snapshotRef.current);
+                            mgr.load(match, grid.cols, grid.rows, grid.data);
+                            setCurrentAnim(match);
+                            setAnimFps(match.fps);
+                            setAnimFrame(0);
+                            mgr.play();
+                        });
+                    }
                 }
             } catch { /* ignore */ }
         });
@@ -466,6 +489,7 @@ export default function LEDBoard() {
 
         mgr.load(anim, grid.cols, grid.rows, grid.data);
         setCurrentAnim(anim);
+        try { localStorage.setItem(STORAGE_KEY_ANIM, anim.name); } catch { }
         setAnimFps(anim.fps);
         setAnimFrame(0);
         mgr.play();
@@ -494,6 +518,7 @@ export default function LEDBoard() {
         }
         canvasHandleRef.current?.redraw();
         setAnimFrame(0);
+        try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
         strokeRecorder.resume();
         saveGridToStorage();
     }, [saveGridToStorage]);
