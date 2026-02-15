@@ -164,7 +164,7 @@ export default function ControlPanel({
             {/* Header — always visible, not scrollable */}
             <div className="flex items-center justify-between px-3 sm:px-4 pt-2 sm:pt-3 pb-1.5 sm:pb-2 shrink-0">
                 <div className="text-sm font-semibold tracking-wide text-green-400">
-                    LED Board
+                    Tenix
                 </div>
                 <button
                     onClick={() => setCollapsed(true)}

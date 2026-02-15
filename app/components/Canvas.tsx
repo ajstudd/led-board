@@ -200,7 +200,7 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
             // Reset cursor auto-hide timer
             setCursorHidden(false);
             if (cursorTimerRef.current) clearTimeout(cursorTimerRef.current);
-            cursorTimerRef.current = setTimeout(() => setCursorHidden(true), 10000);
+            cursorTimerRef.current = setTimeout(() => setCursorHidden(true), 5000);
 
             const cell = cellFromEvent(e);
             if (!cell) return;

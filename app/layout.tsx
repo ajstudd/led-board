@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LED Board",
+  title: "Tenix",
   description: "A programmable LED matrix simulator",
 };
 

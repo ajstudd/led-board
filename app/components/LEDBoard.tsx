@@ -11,10 +11,10 @@ import { captureSnapshot, updateSnapshotPixel } from "../lib/animations";
 import { strokeRecorder } from "../lib/recorder";
 import { uint8ToBase64, base64ToUint8 } from "../lib/utils";
 
-const STORAGE_KEY_COLOR = "led-board-color";
-const STORAGE_KEY_TOOL = "led-board-tool";
-const STORAGE_KEY_GRID = "led-board-grid";
-const STORAGE_KEY_SHOW_GRID = "led-board-showGrid";
+const STORAGE_KEY_COLOR = "tenix-color";
+const STORAGE_KEY_TOOL = "tenix-tool";
+const STORAGE_KEY_GRID = "tenix-grid";
+const STORAGE_KEY_SHOW_GRID = "tenix-showGrid";
 const MAX_UNDO = 50;
 
 export default function LEDBoard() {
@@ -46,6 +46,9 @@ export default function LEDBoard() {
     const undoStackRef = useRef<Uint8ClampedArray[]>([]);
     const strokeActiveRef = useRef(false);
     const [canUndo, setCanUndo] = useState(false);
+
+    // ── Fullscreen state ────────────────────────────────
+    const [isFullscreen, setIsFullscreen] = useState(false);
 
     // ── Initialise grid on mount ──────────────────────────
     useEffect(() => {
@@ -512,6 +515,21 @@ export default function LEDBoard() {
         return () => window.removeEventListener("keydown", onKeyDown);
     }, [handleUndo]);
 
+    // ── Fullscreen tracking ──────────────────────────────
+    useEffect(() => {
+        const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+        document.addEventListener("fullscreenchange", onFsChange);
+        return () => document.removeEventListener("fullscreenchange", onFsChange);
+    }, []);
+
+    const toggleFullscreen = useCallback(() => {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(() => { });
+        } else {
+            document.exitFullscreen().catch(() => { });
+        }
+    }, []);
+
     return (
         <>
             {/* Canvas layer */}
@@ -552,6 +570,22 @@ export default function LEDBoard() {
                 onAnimStop={handleAnimStop}
                 onAnimFpsChange={handleAnimFpsChange}
             />
+
+            {/* Fullscreen button — hidden when already fullscreen */}
+            {!isFullscreen && (
+                <button
+                    onClick={toggleFullscreen}
+                    className="fixed bottom-4 right-4 z-20 rounded-full bg-black/70 p-3 text-white/60 hover:text-white hover:bg-black/90 backdrop-blur-md transition shadow-lg border border-white/10"
+                    title="Enter fullscreen"
+                >
+                    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M8 3H5a2 2 0 00-2 2v3" />
+                        <path d="M21 8V5a2 2 0 00-2-2h-3" />
+                        <path d="M3 16v3a2 2 0 002 2h3" />
+                        <path d="M16 21h3a2 2 0 002-2v-3" />
+                    </svg>
+                </button>
+            )}
         </>
     );
 }
