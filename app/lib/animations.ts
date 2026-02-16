@@ -568,8 +568,57 @@ function replayReverseTick(
 }
 
 // ═══════════════════════════════════════════════════════
+//  Text Marquee — scrolls overflowing text from right to left
+// ═══════════════════════════════════════════════════════
+
+/** Wide buffer and its column count, set externally by LEDBoard */
+let marqueeBuffer: Uint8ClampedArray | null = null;
+let marqueeBufCols = 0;
+
+export function setMarqueeBuffer(
+  buffer: Uint8ClampedArray | null,
+  bufferCols: number = 0,
+): void {
+  marqueeBuffer = buffer;
+  marqueeBufCols = bufferCols;
+}
+
+function marqueeTextTick(
+  cols: number,
+  rows: number,
+  data: Uint8ClampedArray,
+  frame: number,
+) {
+  if (!marqueeBuffer || marqueeBufCols === 0) {
+    // Fallback: just show snapshot
+    if (snapshot) data.set(snapshot);
+    return;
+  }
+
+  // Scroll offset wraps around the full buffer width
+  const offset = frame % marqueeBufCols;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const srcCol = (c + offset) % marqueeBufCols;
+      const si = (r * marqueeBufCols + srcCol) * 3;
+      const di = (r * cols + c) * 3;
+      data[di] = marqueeBuffer[si];
+      data[di + 1] = marqueeBuffer[si + 1];
+      data[di + 2] = marqueeBuffer[si + 2];
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════
 //  Animation Registry
 // ═══════════════════════════════════════════════════════
+
+export const MARQUEE_ANIMATION: AnimationConfig = {
+  name: "Text Marquee",
+  fps: 15,
+  tick: marqueeTextTick,
+};
 
 export const ANIMATIONS: AnimationConfig[] = [
   { name: "Replay Draw", fps: 30, tick: replayDrawTick },

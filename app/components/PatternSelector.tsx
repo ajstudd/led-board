@@ -34,7 +34,7 @@ interface PatternSelectorProps {
     onApplyPattern: (
         fn: (cols: number, rows: number, data: Uint8ClampedArray) => void,
     ) => void;
-    onRenderText: (text: string, color: RGB, scale?: number) => void;
+    onRenderText: (text: string, color: RGB, scale?: number, wrap?: boolean) => void;
     activeColor: RGB;
 }
 
@@ -46,6 +46,7 @@ export default function PatternSelector({
     const [expanded, setExpanded] = useState(false);
     const [textInput, setTextInput] = useState("");
     const [fontScale, setFontScale] = useState(1);
+    const [textWrap, setTextWrap] = useState(true);
     const [thumbnails, setThumbnails] = useState<string[]>([]);
     const generated = useRef(false);
 
@@ -75,9 +76,9 @@ export default function PatternSelector({
 
     const handleTextRender = useCallback(() => {
         if (textInput.trim()) {
-            onRenderText(textInput.trim(), activeColor, fontScale);
+            onRenderText(textInput.trim(), activeColor, fontScale, textWrap);
         }
-    }, [textInput, activeColor, onRenderText, fontScale]);
+    }, [textInput, activeColor, onRenderText, fontScale, textWrap]);
 
     const handleKeyDown = useCallback(
         (e: React.KeyboardEvent) => {
@@ -117,8 +118,8 @@ export default function PatternSelector({
                                         }
                                     }}
                                     className={`group relative flex flex-col items-center rounded p-1 transition ${isGrad && gradientOpen
-                                            ? "bg-green-500/20 ring-1 ring-green-500/50"
-                                            : "bg-white/5 hover:bg-white/15"
+                                        ? "bg-green-500/20 ring-1 ring-green-500/50"
+                                        : "bg-white/5 hover:bg-white/15"
                                         }`}
                                     title={isGrad ? "Click to customise gradient" : p.name}
                                 >
@@ -182,8 +183,8 @@ export default function PatternSelector({
                                         key={dir}
                                         onClick={() => setGradDir(dir)}
                                         className={`flex-1 rounded px-1 py-1.5 text-[10px] transition min-h-8 sm:min-h-0 ${gradDir === dir
-                                                ? "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
-                                                : "bg-white/5 text-white/70 hover:bg-white/10"
+                                            ? "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
+                                            : "bg-white/5 text-white/70 hover:bg-white/10"
                                             }`}
                                     >
                                         {dir === "horizontal" ? "Horiz" : dir === "vertical" ? "Vert" : "Diag"}
@@ -239,6 +240,28 @@ export default function PatternSelector({
                         </div>
                         <div className="mt-1 text-[9px] text-white/30">
                             {5 * fontScale}×{7 * fontScale}px font · renders centred
+                        </div>
+                        {/* Wrap / Overflow toggle */}
+                        <div className="mt-2 flex items-center gap-1.5">
+                            <span className="text-[10px] text-white/40 shrink-0">Text</span>
+                            <button
+                                onClick={() => setTextWrap(true)}
+                                className={`flex-1 rounded px-1.5 py-1.5 text-[10px] transition min-h-8 sm:min-h-0 ${textWrap
+                                        ? "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
+                                        : "bg-white/5 text-white/70 hover:bg-white/10"
+                                    }`}
+                            >
+                                Wrap
+                            </button>
+                            <button
+                                onClick={() => setTextWrap(false)}
+                                className={`flex-1 rounded px-1.5 py-1.5 text-[10px] transition min-h-8 sm:min-h-0 ${!textWrap
+                                        ? "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
+                                        : "bg-white/5 text-white/70 hover:bg-white/10"
+                                    }`}
+                            >
+                                Overflow
+                            </button>
                         </div>
                     </div>
                 </div>
