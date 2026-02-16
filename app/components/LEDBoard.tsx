@@ -51,6 +51,15 @@ export default function LEDBoard() {
     // ── Fullscreen state ────────────────────────────────
     const [isFullscreen, setIsFullscreen] = useState(false);
 
+    // ── Content layers tracking (for re-applying on resize) ──
+    // Stores an ordered list of operations to replay when the grid resizes.
+    // A pattern always replaces everything (resets the stack), while text
+    // is additive (pushed on top).
+    type ContentLayer =
+        | { type: "pattern"; fn: (cols: number, rows: number, data: Uint8ClampedArray) => void }
+        | { type: "text"; text: string; color: RGB; scale: number };
+    const contentLayersRef = useRef<ContentLayer[]>([]);
+
     // ── Initialise grid on mount ──────────────────────────
     useEffect(() => {
         const w = window.innerWidth;
@@ -193,22 +202,54 @@ export default function LEDBoard() {
             const grid = gridRef.current;
             if (!grid) return;
 
-            // Resize animation snapshot if active
-            if (snapshotRef.current) {
-                const newSnap = new Uint8ClampedArray(newCols * newRows * 3);
-                const copyCols = Math.min(oldCols, newCols);
-                const copyRows = Math.min(oldRows, newRows);
-                for (let r = 0; r < copyRows; r++) {
-                    for (let c = 0; c < copyCols; c++) {
-                        const si = (r * oldCols + c) * 3;
-                        const di = (r * newCols + c) * 3;
-                        newSnap[di] = snapshotRef.current[si];
-                        newSnap[di + 1] = snapshotRef.current[si + 1];
-                        newSnap[di + 2] = snapshotRef.current[si + 2];
+            const layers = contentLayersRef.current;
+
+            if (layers.length > 0) {
+                // ── Replay all content layers into the new dimensions ──
+                // This correctly handles pattern + text combos,
+                // multiple texts on top of a pattern, etc.
+                const buf = new Uint8ClampedArray(newCols * newRows * 3);
+
+                for (const layer of layers) {
+                    if (layer.type === "pattern") {
+                        // Pattern always fills the entire grid (it already cleared before)
+                        buf.fill(0);
+                        layer.fn(newCols, newRows, buf);
+                    } else if (layer.type === "text") {
+                        // Text is rendered on top of whatever's in the buffer
+                        renderTextCentered(
+                            layer.text, newCols, newRows,
+                            buf, layer.color, layer.scale,
+                        );
                     }
                 }
-                snapshotRef.current = newSnap;
-                captureSnapshot(snapshotRef.current);
+
+                if (snapshotRef.current) {
+                    snapshotRef.current = buf;
+                    captureSnapshot(snapshotRef.current);
+                    grid.loadData(snapshotRef.current);
+                } else {
+                    grid.loadData(buf);
+                }
+            } else {
+                // No tracked content layers — use resizePreserve data (already done)
+                // Just resize the snapshot if active
+                if (snapshotRef.current) {
+                    const newSnap = new Uint8ClampedArray(newCols * newRows * 3);
+                    const copyCols = Math.min(oldCols, newCols);
+                    const copyRows = Math.min(oldRows, newRows);
+                    for (let r = 0; r < copyRows; r++) {
+                        for (let c = 0; c < copyCols; c++) {
+                            const si = (r * oldCols + c) * 3;
+                            const di = (r * newCols + c) * 3;
+                            newSnap[di] = snapshotRef.current[si];
+                            newSnap[di + 1] = snapshotRef.current[si + 1];
+                            newSnap[di + 2] = snapshotRef.current[si + 2];
+                        }
+                    }
+                    snapshotRef.current = newSnap;
+                    captureSnapshot(snapshotRef.current);
+                }
             }
 
             // Clear undo stack on resize (data sizes changed)
@@ -399,6 +440,7 @@ export default function LEDBoard() {
     const clearBoard = useCallback(() => {
         pushUndo();
         strokeRecorder.clear();
+        contentLayersRef.current = [];
         if (snapshotRef.current) {
             // Clear the content buffer; animation tick picks up the change
             snapshotRef.current.fill(0);
@@ -420,6 +462,9 @@ export default function LEDBoard() {
             const grid = gridRef.current;
             if (!grid) return;
             pushUndo();
+
+            // Pattern replaces everything — reset the layers stack
+            contentLayersRef.current = [{ type: "pattern", fn }];
 
             if (snapshotRef.current) {
                 // Apply pattern to the content buffer
@@ -450,6 +495,9 @@ export default function LEDBoard() {
             const grid = gridRef.current;
             if (!grid) return;
             pushUndo();
+
+            // Text is additive — push on top of existing layers
+            contentLayersRef.current.push({ type: "text", text, color, scale });
 
             if (snapshotRef.current) {
                 // Render text into the content buffer
