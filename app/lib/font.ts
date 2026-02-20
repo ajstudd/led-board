@@ -107,7 +107,9 @@ export function renderChar(
 
 /**
  * Render a string of text onto the grid.
- * Auto-wraps at the grid edge. `scale` multiplies the font size.
+ * When `wrap` is true (default) text wraps to the next line at the grid edge.
+ * When `wrap` is false text continues past the grid boundary (overflow / clip).
+ * `scale` multiplies the font size.
  */
 export function renderText(
   text: string,
@@ -118,6 +120,7 @@ export function renderText(
   data: Uint8ClampedArray,
   color: RGB,
   scale: number = 1,
+  wrap: boolean = true,
 ): void {
   let curCol = startCol;
   let curRow = startRow;
@@ -125,13 +128,17 @@ export function renderText(
   const charH = CHAR_HEIGHT * scale;
 
   for (const ch of text) {
-    // Wrap to next line if we'd overflow
-    if (curCol + charW > cols) {
-      curCol = startCol;
-      curRow += charH + scale;
+    if (wrap) {
+      // Wrap to next line if we'd overflow
+      if (curCol + charW > cols) {
+        curCol = startCol;
+        curRow += charH + scale;
+      }
     }
     // Stop if we'd overflow vertically
     if (curRow + charH > rows) break;
+    // In overflow mode, stop rendering once fully off-screen to the right
+    if (!wrap && curCol >= cols) break;
 
     curCol += renderChar(ch, curCol, curRow, cols, rows, data, color, scale);
   }
@@ -149,6 +156,10 @@ export function measureText(text: string, scale: number = 1): number {
 
 /**
  * Render centred text on the grid.
+ * When `wrap` is true (default) text wraps to the next line.
+ * When `wrap` is false the text stays on one line at full scale, centred if
+ * it fits, or left-aligned if it doesn't. Characters past the right edge are
+ * simply clipped (renderChar already bounds-checks each pixel).
  */
 export function renderTextCentered(
   text: string,
@@ -157,10 +168,71 @@ export function renderTextCentered(
   data: Uint8ClampedArray,
   color: RGB,
   scale: number = 1,
+  wrap: boolean = true,
 ): void {
   const textWidth = measureText(text, scale);
   const charH = CHAR_HEIGHT * scale;
-  const startCol = Math.max(0, Math.floor((cols - textWidth) / 2));
   const startRow = Math.max(0, Math.floor((rows - charH) / 2));
-  renderText(text, startCol, startRow, cols, rows, data, color, scale);
+
+  if (wrap) {
+    const startCol = Math.max(0, Math.floor((cols - textWidth) / 2));
+    renderText(text, startCol, startRow, cols, rows, data, color, scale, true);
+  } else {
+    // Single line — centre if it fits, otherwise left-align (col 0).
+    // Text past the grid edge is clipped by renderChar's bounds checks.
+    const startCol = textWidth <= cols ? Math.floor((cols - textWidth) / 2) : 0;
+    renderText(text, startCol, startRow, cols, rows, data, color, scale, false);
+  }
+}
+
+/**
+ * Render text into a buffer that may be wider than the visible grid.
+ * Used for marquee/scroll: the buffer width = max(cols, textWidth + cols)
+ * so the text can scroll completely through.
+ * Returns { buffer, bufferCols, textWidth } for the caller to animate.
+ */
+export function renderTextToWideBuffer(
+  text: string,
+  cols: number,
+  rows: number,
+  color: RGB,
+  scale: number = 1,
+  baseData?: Uint8ClampedArray,
+): { buffer: Uint8ClampedArray; bufferCols: number; textWidth: number } {
+  const textWidth = measureText(text, scale);
+  // Buffer is wide enough so the text can scroll fully off to the left
+  // and new text enters from the right: need cols (visible) + textWidth.
+  const bufferCols = cols + textWidth;
+  const buffer = new Uint8ClampedArray(bufferCols * rows * 3);
+
+  // If there's base content (e.g. a pattern), tile it across the wide buffer
+  if (baseData && baseData.length === cols * rows * 3) {
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < bufferCols; c++) {
+        const srcC = c % cols;
+        const si = (r * cols + srcC) * 3;
+        const di = (r * bufferCols + c) * 3;
+        buffer[di] = baseData[si];
+        buffer[di + 1] = baseData[si + 1];
+        buffer[di + 2] = baseData[si + 2];
+      }
+    }
+  }
+
+  // Render text starting at column `cols` (just off-screen to the right)
+  const charH = CHAR_HEIGHT * scale;
+  const startRow = Math.max(0, Math.floor((rows - charH) / 2));
+  renderText(
+    text,
+    cols,
+    startRow,
+    bufferCols,
+    rows,
+    buffer,
+    color,
+    scale,
+    false,
+  );
+
+  return { buffer, bufferCols, textWidth };
 }

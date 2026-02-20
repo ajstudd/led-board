@@ -20,7 +20,7 @@ interface ControlPanelProps {
     onUndo: () => void;
     canUndo: boolean;
     onApplyPattern: (fn: (cols: number, rows: number, data: Uint8ClampedArray) => void) => void;
-    onRenderText: (text: string, color: RGB, scale?: number) => void;
+    onRenderText: (text: string, color: RGB, scale?: number, wrap?: boolean) => void;
     // Animation
     animState: AnimationState;
     currentAnim: AnimationConfig | null;
@@ -296,6 +296,9 @@ export default function ControlPanel({
                     {activeTool === "draw" && "Click or drag to paint"}
                     {activeTool === "erase" && "Click or drag to erase"}
                     {activeTool === "fill" && "Click to flood-fill a region"}
+                </div>
+                <div className="text-white/25 text-[9px] leading-relaxed">
+                    <span className="text-white/35">F</span> fullscreen · <span className="text-white/35">Space</span> pause/play
                 </div>
             </div>
         </div>

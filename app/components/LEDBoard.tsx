@@ -5,9 +5,9 @@ import { GridManager } from "../lib/grid";
 import LEDCanvas, { CanvasHandle } from "./Canvas";
 import ControlPanel from "./ControlPanel";
 import { DEFAULT_SETTINGS, BoardSettings, RGB, ToolKind, AnimationConfig } from "../types";
-import { renderTextCentered } from "../lib/font";
+import { renderTextCentered, renderTextToWideBuffer, measureText } from "../lib/font";
 import { AnimationManager, AnimationState } from "../lib/animation";
-import { ANIMATIONS, captureSnapshot, updateSnapshotPixel } from "../lib/animations";
+import { ANIMATIONS, MARQUEE_ANIMATION, captureSnapshot, updateSnapshotPixel, setMarqueeBuffer } from "../lib/animations";
 import { strokeRecorder } from "../lib/recorder";
 import { uint8ToBase64, base64ToUint8 } from "../lib/utils";
 
@@ -57,7 +57,7 @@ export default function LEDBoard() {
     // is additive (pushed on top).
     type ContentLayer =
         | { type: "pattern"; fn: (cols: number, rows: number, data: Uint8ClampedArray) => void }
-        | { type: "text"; text: string; color: RGB; scale: number };
+        | { type: "text"; text: string; color: RGB; scale: number; wrap: boolean };
     const contentLayersRef = useRef<ContentLayer[]>([]);
 
     // ── Initialise grid on mount ──────────────────────────
@@ -196,6 +196,24 @@ export default function LEDBoard() {
         };
     }, [saveGridToStorage]);
 
+    // ── Replay content layers into a buffer ─────────────
+    const replayLayers = useCallback(
+        (layers: ContentLayer[], cols: number, rows: number, buf: Uint8ClampedArray) => {
+            for (const layer of layers) {
+                if (layer.type === "pattern") {
+                    buf.fill(0);
+                    layer.fn(cols, rows, buf);
+                } else if (layer.type === "text") {
+                    renderTextCentered(
+                        layer.text, cols, rows, buf,
+                        layer.color, layer.scale, layer.wrap,
+                    );
+                }
+            }
+        },
+        [],
+    );
+
     // ── Handle grid resize (called from Canvas after resizePreserve) ──
     const handleGridResize = useCallback(
         (oldCols: number, oldRows: number, newCols: number, newRows: number) => {
@@ -205,31 +223,55 @@ export default function LEDBoard() {
             const layers = contentLayersRef.current;
 
             if (layers.length > 0) {
-                // ── Replay all content layers into the new dimensions ──
-                // This correctly handles pattern + text combos,
-                // multiple texts on top of a pattern, etc.
-                const buf = new Uint8ClampedArray(newCols * newRows * 3);
+                // Find the text layer (if any) to check for marquee rebuild
+                const textLayer = layers.find((l) => l.type === "text") as
+                    | (ContentLayer & { type: "text" })
+                    | undefined;
+                const patternLayers = layers.filter((l) => l.type === "pattern");
+                const isMarquee =
+                    textLayer &&
+                    !textLayer.wrap &&
+                    measureText(textLayer.text, textLayer.scale) > newCols;
 
-                for (const layer of layers) {
-                    if (layer.type === "pattern") {
-                        // Pattern always fills the entire grid (it already cleared before)
-                        buf.fill(0);
-                        layer.fn(newCols, newRows, buf);
-                    } else if (layer.type === "text") {
-                        // Text is rendered on top of whatever's in the buffer
-                        renderTextCentered(
-                            layer.text, newCols, newRows,
-                            buf, layer.color, layer.scale,
-                        );
+                if (isMarquee && textLayer) {
+                    // Rebuild the marquee buffer for new dimensions
+                    let baseData: Uint8ClampedArray | undefined;
+                    if (patternLayers.length > 0) {
+                        baseData = new Uint8ClampedArray(newCols * newRows * 3);
+                        for (const layer of patternLayers) {
+                            baseData.fill(0);
+                            (layer as ContentLayer & { type: "pattern" }).fn(newCols, newRows, baseData);
+                        }
                     }
-                }
+                    const { buffer, bufferCols } = renderTextToWideBuffer(
+                        textLayer.text, newCols, newRows,
+                        textLayer.color, textLayer.scale, baseData,
+                    );
+                    setMarqueeBuffer(buffer, bufferCols);
 
-                if (snapshotRef.current) {
-                    snapshotRef.current = buf;
+                    // Update snapshot with base pattern
+                    const newSnap = new Uint8ClampedArray(newCols * newRows * 3);
+                    if (baseData) newSnap.set(baseData);
+                    snapshotRef.current = newSnap;
                     captureSnapshot(snapshotRef.current);
                     grid.loadData(snapshotRef.current);
                 } else {
-                    grid.loadData(buf);
+                    // Text fits or wrap mode — replay normally
+                    const buf = new Uint8ClampedArray(newCols * newRows * 3);
+                    replayLayers(layers, newCols, newRows, buf);
+
+                    // If was a marquee but now fits, stop marquee
+                    if (animRef.current?.currentAnimation?.name === "Text Marquee") {
+                        setMarqueeBuffer(null);
+                    }
+
+                    if (snapshotRef.current) {
+                        snapshotRef.current = buf;
+                        captureSnapshot(snapshotRef.current);
+                        grid.loadData(snapshotRef.current);
+                    } else {
+                        grid.loadData(buf);
+                    }
                 }
             } else {
                 // No tracked content layers — use resizePreserve data (already done)
@@ -263,7 +305,7 @@ export default function LEDBoard() {
                 animRef.current.updateGrid(newCols, newRows, grid.data);
             }
         },
-        [],
+        [replayLayers],
     );
 
     // ── Undo helpers ───────────────────────────────────
@@ -441,6 +483,7 @@ export default function LEDBoard() {
         pushUndo();
         strokeRecorder.clear();
         contentLayersRef.current = [];
+        setMarqueeBuffer(null);
         if (snapshotRef.current) {
             // Clear the content buffer; animation tick picks up the change
             snapshotRef.current.fill(0);
@@ -491,31 +534,91 @@ export default function LEDBoard() {
 
     // ── Render pixel text ─────────────────────────────────
     const handleRenderText = useCallback(
-        (text: string, color: RGB, scale: number = 1) => {
+        (text: string, color: RGB, scale: number = 1, wrap: boolean = true) => {
             const grid = gridRef.current;
+            const mgr = animRef.current;
             if (!grid) return;
             pushUndo();
 
-            // Text is additive — push on top of existing layers
-            contentLayersRef.current.push({ type: "text", text, color, scale });
+            // Replace any previous text layers but keep pattern layers,
+            // then add the new text layer on top. This prevents old text
+            // from bleeding through when re-rendering or switching modes.
+            const patternLayers = contentLayersRef.current.filter(
+                (l): l is ContentLayer & { type: "pattern" } => l.type === "pattern",
+            );
+            const newTextLayer: ContentLayer = { type: "text", text, color, scale, wrap };
+            contentLayersRef.current = [...patternLayers, newTextLayer];
 
-            if (snapshotRef.current) {
-                // Render text into the content buffer
-                renderTextCentered(text, grid.cols, grid.rows, snapshotRef.current, color, scale);
+            const textWidth = measureText(text, scale);
+            const overflows = !wrap && textWidth > grid.cols;
+
+            if (overflows && mgr) {
+                // ── Text overflows in overflow mode → auto-start marquee ──
+                // Build a base layer (pattern) if any
+                let baseData: Uint8ClampedArray | undefined;
+                if (patternLayers.length > 0) {
+                    baseData = new Uint8ClampedArray(grid.cols * grid.rows * 3);
+                    for (const layer of patternLayers) {
+                        baseData.fill(0);
+                        layer.fn(grid.cols, grid.rows, baseData);
+                    }
+                }
+
+                // Render text into a wide buffer for the marquee animation
+                const { buffer, bufferCols } = renderTextToWideBuffer(
+                    text, grid.cols, grid.rows, color, scale, baseData,
+                );
+                setMarqueeBuffer(buffer, bufferCols);
+
+                // Set up snapshot with just the base pattern (or black)
+                if (!snapshotRef.current) {
+                    snapshotRef.current = grid.cloneData();
+                }
+                snapshotRef.current.fill(0);
+                if (baseData) snapshotRef.current.set(baseData);
                 captureSnapshot(snapshotRef.current);
-                strokeRecorder.recordText(text, grid.cols, grid.rows, color, scale, true);
-                if (animRef.current?.state !== "playing") {
-                    grid.loadData(snapshotRef.current);
+
+                strokeRecorder.pause();
+                mgr.load(MARQUEE_ANIMATION, grid.cols, grid.rows, grid.data);
+                setCurrentAnim(MARQUEE_ANIMATION);
+                try { localStorage.setItem(STORAGE_KEY_ANIM, MARQUEE_ANIMATION.name); } catch { }
+                setAnimFps(MARQUEE_ANIMATION.fps);
+                setAnimFrame(0);
+                mgr.play();
+            } else {
+                // ── Normal rendering (wrap mode or text fits) ──
+                // Stop any running marquee
+                if (mgr && mgr.currentAnimation?.name === "Text Marquee") {
+                    mgr.stop();
+                    setMarqueeBuffer(null);
+                    if (snapshotRef.current) {
+                        grid.loadData(snapshotRef.current);
+                        snapshotRef.current = null;
+                    }
+                    setAnimFrame(0);
+                    try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
+                    strokeRecorder.resume();
+                }
+
+                if (snapshotRef.current) {
+                    snapshotRef.current.fill(0);
+                    replayLayers(contentLayersRef.current, grid.cols, grid.rows, snapshotRef.current);
+                    captureSnapshot(snapshotRef.current);
+                    strokeRecorder.recordText(text, grid.cols, grid.rows, color, scale, true);
+                    if (animRef.current?.state !== "playing") {
+                        grid.loadData(snapshotRef.current);
+                        canvasHandleRef.current?.redraw();
+                    }
+                } else {
+                    grid.clear();
+                    replayLayers(contentLayersRef.current, grid.cols, grid.rows, grid.data);
+                    strokeRecorder.recordText(text, grid.cols, grid.rows, color, scale, true);
                     canvasHandleRef.current?.redraw();
                 }
-            } else {
-                renderTextCentered(text, grid.cols, grid.rows, grid.data, color, scale);
-                strokeRecorder.recordText(text, grid.cols, grid.rows, color, scale, true);
-                canvasHandleRef.current?.redraw();
             }
             saveGridToStorage();
         },
-        [pushUndo, saveGridToStorage],
+        [pushUndo, saveGridToStorage, replayLayers],
     );
 
     // ── Animation controls ────────────────────────────────
@@ -534,6 +637,9 @@ export default function LEDBoard() {
             snapshotRef.current = grid.cloneData();
         }
         captureSnapshot(snapshotRef.current);
+
+        // Clean up marquee buffer if switching to a different animation
+        setMarqueeBuffer(null);
 
         mgr.load(anim, grid.cols, grid.rows, grid.data);
         setCurrentAnim(anim);
@@ -558,6 +664,7 @@ export default function LEDBoard() {
 
     const handleAnimStop = useCallback(() => {
         animRef.current?.stop();
+        setMarqueeBuffer(null); // clean up marquee if it was running
         // Restore original content
         const grid = gridRef.current;
         if (grid && snapshotRef.current) {
@@ -576,18 +683,6 @@ export default function LEDBoard() {
         animRef.current?.setFps(fps);
     }, []);
 
-    // ── Keyboard shortcuts ────────────────────────────
-    useEffect(() => {
-        const onKeyDown = (e: KeyboardEvent) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
-                e.preventDefault();
-                handleUndo();
-            }
-        };
-        window.addEventListener("keydown", onKeyDown);
-        return () => window.removeEventListener("keydown", onKeyDown);
-    }, [handleUndo]);
-
     // ── Fullscreen tracking ──────────────────────────────
     useEffect(() => {
         const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -602,6 +697,54 @@ export default function LEDBoard() {
             document.exitFullscreen().catch(() => { });
         }
     }, []);
+
+    // ── Keyboard shortcuts ────────────────────────────
+    useEffect(() => {
+        const isInputFocused = () => {
+            const el = document.activeElement;
+            if (!el) return false;
+            const tag = el.tagName;
+            return (
+                tag === "INPUT" ||
+                tag === "TEXTAREA" ||
+                tag === "SELECT" ||
+                (el as HTMLElement).isContentEditable
+            );
+        };
+
+        const onKeyDown = (e: KeyboardEvent) => {
+            // Ctrl+Z / Cmd+Z — undo (always, even in input)
+            if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+                e.preventDefault();
+                handleUndo();
+                return;
+            }
+
+            // Skip remaining shortcuts when typing in an input
+            if (isInputFocused()) return;
+
+            // F — toggle fullscreen
+            if (e.key === "f" || e.key === "F") {
+                e.preventDefault();
+                toggleFullscreen();
+                return;
+            }
+
+            // Space — pause / resume animation (only when an animation is active)
+            if (e.key === " " && animRef.current) {
+                const state = animRef.current.state;
+                if (state === "playing") {
+                    e.preventDefault();
+                    handleAnimPause();
+                } else if (state === "paused") {
+                    e.preventDefault();
+                    handleAnimPlay();
+                }
+            }
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [handleUndo, toggleFullscreen, handleAnimPause, handleAnimPlay]);
 
     return (
         <>
