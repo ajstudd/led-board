@@ -10,18 +10,23 @@ import { AnimationManager, AnimationState } from "../lib/animation";
 import { ANIMATIONS, MARQUEE_ANIMATION, captureSnapshot, updateSnapshotPixel, setMarqueeBuffer } from "../lib/animations";
 import { strokeRecorder } from "../lib/recorder";
 import { uint8ToBase64, base64ToUint8 } from "../lib/utils";
+import { EffectsEngine, EffectPreset, EFFECT_PRESETS, EffectsOverlay } from "../lib/effects";
 
 const STORAGE_KEY_COLOR = "tenix-color";
 const STORAGE_KEY_TOOL = "tenix-tool";
 const STORAGE_KEY_GRID = "tenix-grid";
 const STORAGE_KEY_SHOW_GRID = "tenix-showGrid";
 const STORAGE_KEY_ANIM = "tenix-anim";
+const STORAGE_KEY_EFFECTS = "tenix-effects";
+const STORAGE_KEY_EFFECT_PRESET = "tenix-effectPreset";
 const MAX_UNDO = 50;
 
 export default function LEDBoard() {
     const gridRef = useRef<GridManager | null>(null);
     const canvasHandleRef = useRef<CanvasHandle>(null);
     const animRef = useRef<AnimationManager | null>(null);
+    const effectsRef = useRef<EffectsEngine | null>(null);
+    const effectsOverlayRef = useRef<EffectsOverlay | null>(null);
 
     const [settings, setSettings] = useState<BoardSettings>(DEFAULT_SETTINGS);
     const [activeTool, setActiveTool] = useState<ToolKind>("draw");
@@ -42,6 +47,10 @@ export default function LEDBoard() {
     const [animFps, setAnimFps] = useState(15);
     const [animFrame, setAnimFrame] = useState(0);
     const snapshotRef = useRef<Uint8ClampedArray | null>(null);
+
+    // ── Effects state ──────────────────────────────────
+    const [effectsEnabled, setEffectsEnabled] = useState(false);
+    const [activeEffectPreset, setActiveEffectPreset] = useState<EffectPreset>(EFFECT_PRESETS[0]);
 
     // ── Undo stack ──────────────────────────────────────
     const undoStackRef = useRef<Uint8ClampedArray[]>([]);
@@ -105,6 +114,40 @@ export default function LEDBoard() {
         animRef.current = new AnimationManager(redraw, onStateChange);
         return () => {
             animRef.current?.destroy();
+        };
+    }, []);
+
+    // ── Initialise effects engine ─────────────────────────
+    useEffect(() => {
+        const redraw = () => {
+            canvasHandleRef.current?.redraw();
+        };
+        const engine = new EffectsEngine(redraw);
+        effectsRef.current = engine;
+        // Size the overlay to match the current grid
+        const grid = gridRef.current;
+        if (grid) {
+            engine.updateGrid(grid.cols, grid.rows);
+            effectsOverlayRef.current = engine.overlay;
+        }
+        // Restore saved preferences
+        try {
+            const savedEnabled = localStorage.getItem(STORAGE_KEY_EFFECTS);
+            if (savedEnabled === "true") {
+                engine.setEnabled(true);
+                queueMicrotask(() => setEffectsEnabled(true));
+            }
+            const savedPreset = localStorage.getItem(STORAGE_KEY_EFFECT_PRESET);
+            if (savedPreset) {
+                const match = EFFECT_PRESETS.find((p) => p.name === savedPreset);
+                if (match) {
+                    engine.setPreset(match);
+                    queueMicrotask(() => setActiveEffectPreset(match));
+                }
+            }
+        } catch { /* ignore */ }
+        return () => {
+            engine.destroy();
         };
     }, []);
 
@@ -304,6 +347,12 @@ export default function LEDBoard() {
             if (animRef.current) {
                 animRef.current.updateGrid(newCols, newRows, grid.data);
             }
+
+            // Keep effects engine in sync with resized grid
+            if (effectsRef.current) {
+                effectsRef.current.updateGrid(newCols, newRows);
+                effectsOverlayRef.current = effectsRef.current.overlay;
+            }
         },
         [replayLayers],
     );
@@ -370,6 +419,7 @@ export default function LEDBoard() {
                         snap[idx + 2] = activeColor[2];
                         updateSnapshotPixel(idx, activeColor[0], activeColor[1], activeColor[2]);
                         strokeRecorder.record(col, row, activeColor[0], activeColor[1], activeColor[2]);
+                        effectsRef.current?.trigger(col, row, activeColor);
                         break;
                     case "erase":
                         snap[idx] = settings.backgroundColor[0];
@@ -387,6 +437,7 @@ export default function LEDBoard() {
                             settings.backgroundColor[1],
                             settings.backgroundColor[2],
                         );
+                        effectsRef.current?.trigger(col, row, activeColor);
                         break;
                     case "fill": {
                         // Temporarily load content, flood-fill, save back
@@ -411,6 +462,7 @@ export default function LEDBoard() {
                     case "draw":
                         grid.setCell(col, row, activeColor);
                         strokeRecorder.record(col, row, activeColor[0], activeColor[1], activeColor[2]);
+                        effectsRef.current?.trigger(col, row, activeColor);
                         break;
                     case "erase":
                         grid.setCell(col, row, settings.backgroundColor);
@@ -420,6 +472,7 @@ export default function LEDBoard() {
                             settings.backgroundColor[1],
                             settings.backgroundColor[2],
                         );
+                        effectsRef.current?.trigger(col, row, activeColor);
                         break;
                     case "fill": {
                         const before = grid.cloneData();
@@ -683,6 +736,22 @@ export default function LEDBoard() {
         animRef.current?.setFps(fps);
     }, []);
 
+    // ── Effects controls ──────────────────────────────────
+    const handleToggleEffects = useCallback(() => {
+        setEffectsEnabled((prev) => {
+            const next = !prev;
+            effectsRef.current?.setEnabled(next);
+            try { localStorage.setItem(STORAGE_KEY_EFFECTS, String(next)); } catch { }
+            return next;
+        });
+    }, []);
+
+    const handleSelectEffectPreset = useCallback((preset: EffectPreset) => {
+        setActiveEffectPreset(preset);
+        effectsRef.current?.setPreset(preset);
+        try { localStorage.setItem(STORAGE_KEY_EFFECT_PRESET, preset.name); } catch { }
+    }, []);
+
     // ── Fullscreen tracking ──────────────────────────────
     useEffect(() => {
         const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -752,6 +821,7 @@ export default function LEDBoard() {
             <LEDCanvas
                 ref={canvasHandleRef}
                 gridRef={gridRef}
+                effectsOverlayRef={effectsOverlayRef}
                 settings={settings}
                 onCellHover={handleCellHover}
                 onCellClick={handleCellClick}
@@ -785,6 +855,11 @@ export default function LEDBoard() {
                 onAnimPause={handleAnimPause}
                 onAnimStop={handleAnimStop}
                 onAnimFpsChange={handleAnimFpsChange}
+                // Effects props
+                effectsEnabled={effectsEnabled}
+                activeEffectPreset={activeEffectPreset}
+                onToggleEffects={handleToggleEffects}
+                onSelectEffectPreset={handleSelectEffectPreset}
             />
 
             {/* Fullscreen button — hidden when already fullscreen */}

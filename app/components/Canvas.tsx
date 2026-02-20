@@ -10,6 +10,7 @@ import {
 } from "react";
 import { GridManager } from "../lib/grid";
 import { DEFAULT_SETTINGS, BoardSettings } from "../types";
+import { EffectsOverlay } from "../lib/effects";
 
 export interface CanvasHandle {
     redraw: () => void;
@@ -18,6 +19,7 @@ export interface CanvasHandle {
 
 interface CanvasProps {
     gridRef: React.RefObject<GridManager | null>;
+    effectsOverlayRef?: React.RefObject<EffectsOverlay | null>;
     settings?: BoardSettings;
     onCellHover?: (col: number, row: number) => void;
     onCellClick?: (col: number, row: number) => void;
@@ -30,6 +32,7 @@ interface CanvasProps {
 const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
     {
         gridRef,
+        effectsOverlayRef,
         settings = DEFAULT_SETTINGS,
         onCellHover,
         onCellClick,
@@ -103,7 +106,23 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
                 ctx.stroke();
             }
         }
-    }, [gridRef, settings]);
+
+        // ── Draw effects overlay (additive blend) ─────────
+        const overlay = effectsOverlayRef?.current;
+        if (overlay?.buffer && overlay.cols > 0) {
+            ctx.globalCompositeOperation = "lighter";
+            for (let r = 0; r < Math.min(rows, overlay.rows); r++) {
+                for (let c = 0; c < Math.min(cols, overlay.cols); c++) {
+                    const oi = (r * overlay.cols + c) * 4;
+                    const alpha = overlay.buffer[oi + 3];
+                    if (alpha === 0) continue;
+                    ctx.fillStyle = `rgba(${overlay.buffer[oi]},${overlay.buffer[oi + 1]},${overlay.buffer[oi + 2]},${alpha / 255})`;
+                    ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+                }
+            }
+            ctx.globalCompositeOperation = "source-over";
+        }
+    }, [gridRef, effectsOverlayRef, settings]);
 
     // ── Expose redraw & canvas ref to parent ──────────────
     useImperativeHandle(

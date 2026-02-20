@@ -5,7 +5,9 @@ import { ToolKind, RGB, BoardSettings, AnimationConfig } from "../types";
 import ColorPicker from "./ColorPicker";
 import PatternSelector from "./PatternSelector";
 import AnimationPanel from "./AnimationPanel";
+import EffectsPanel from "./EffectsPanel";
 import { AnimationState } from "../lib/animation";
+import { EffectPreset } from "../lib/effects";
 
 interface ControlPanelProps {
     activeTool: ToolKind;
@@ -31,6 +33,11 @@ interface ControlPanelProps {
     onAnimPause: () => void;
     onAnimStop: () => void;
     onAnimFpsChange: (fps: number) => void;
+    // Effects
+    effectsEnabled: boolean;
+    activeEffectPreset: EffectPreset;
+    onToggleEffects: () => void;
+    onSelectEffectPreset: (preset: EffectPreset) => void;
 }
 
 const TOOLS: { kind: ToolKind; label: string; shortLabel: string }[] = [
@@ -89,6 +96,10 @@ export default function ControlPanel({
     onAnimPause,
     onAnimStop,
     onAnimFpsChange,
+    effectsEnabled,
+    activeEffectPreset,
+    onToggleEffects,
+    onSelectEffectPreset,
 }: ControlPanelProps) {
     const [collapsed, setCollapsed] = useState(false);
 
@@ -246,6 +257,17 @@ export default function ControlPanel({
                     onPause={onAnimPause}
                     onStop={onAnimStop}
                     onFpsChange={onAnimFpsChange}
+                />
+
+                {/* Separator */}
+                <div className="h-px bg-white/10" />
+
+                {/* Pixel Effects */}
+                <EffectsPanel
+                    enabled={effectsEnabled}
+                    activePreset={activeEffectPreset}
+                    onToggle={onToggleEffects}
+                    onSelectPreset={onSelectEffectPreset}
                 />
 
                 {/* Separator */}
