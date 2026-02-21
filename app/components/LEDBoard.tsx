@@ -19,6 +19,8 @@ const STORAGE_KEY_SHOW_GRID = "tenix-showGrid";
 const STORAGE_KEY_ANIM = "tenix-anim";
 const STORAGE_KEY_EFFECTS = "tenix-effects";
 const STORAGE_KEY_EFFECT_PRESET = "tenix-effectPreset";
+const STORAGE_KEY_EFFECT_DISTANCE = "tenix-effectDistance";
+const STORAGE_KEY_EFFECT_SPEED = "tenix-effectSpeed";
 const MAX_UNDO = 50;
 
 export default function LEDBoard() {
@@ -51,6 +53,8 @@ export default function LEDBoard() {
     // ── Effects state ──────────────────────────────────
     const [effectsEnabled, setEffectsEnabled] = useState(false);
     const [activeEffectPreset, setActiveEffectPreset] = useState<EffectPreset>(EFFECT_PRESETS[0]);
+    const [effectsDistance, setEffectsDistance] = useState(1);
+    const [effectsSpeed, setEffectsSpeed] = useState(1);
 
     // ── Undo stack ──────────────────────────────────────
     const undoStackRef = useRef<Uint8ClampedArray[]>([]);
@@ -143,6 +147,22 @@ export default function LEDBoard() {
                 if (match) {
                     engine.setPreset(match);
                     queueMicrotask(() => setActiveEffectPreset(match));
+                }
+            }
+            const savedDist = localStorage.getItem(STORAGE_KEY_EFFECT_DISTANCE);
+            if (savedDist) {
+                const v = parseFloat(savedDist);
+                if (!isNaN(v)) {
+                    engine.setDistanceMultiplier(v);
+                    queueMicrotask(() => setEffectsDistance(v));
+                }
+            }
+            const savedSpeed = localStorage.getItem(STORAGE_KEY_EFFECT_SPEED);
+            if (savedSpeed) {
+                const v = parseFloat(savedSpeed);
+                if (!isNaN(v)) {
+                    engine.setSpeedMultiplier(v);
+                    queueMicrotask(() => setEffectsSpeed(v));
                 }
             }
         } catch { /* ignore */ }
@@ -725,6 +745,7 @@ export default function LEDBoard() {
             snapshotRef.current = null;
         }
         canvasHandleRef.current?.redraw();
+        setCurrentAnim(null); // fully clear — not just paused
         setAnimFrame(0);
         try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
         strokeRecorder.resume();
@@ -750,6 +771,18 @@ export default function LEDBoard() {
         setActiveEffectPreset(preset);
         effectsRef.current?.setPreset(preset);
         try { localStorage.setItem(STORAGE_KEY_EFFECT_PRESET, preset.name); } catch { }
+    }, []);
+
+    const handleEffectsDistanceChange = useCallback((v: number) => {
+        setEffectsDistance(v);
+        effectsRef.current?.setDistanceMultiplier(v);
+        try { localStorage.setItem(STORAGE_KEY_EFFECT_DISTANCE, String(v)); } catch { }
+    }, []);
+
+    const handleEffectsSpeedChange = useCallback((v: number) => {
+        setEffectsSpeed(v);
+        effectsRef.current?.setSpeedMultiplier(v);
+        try { localStorage.setItem(STORAGE_KEY_EFFECT_SPEED, String(v)); } catch { }
     }, []);
 
     // ── Fullscreen tracking ──────────────────────────────
@@ -858,8 +891,12 @@ export default function LEDBoard() {
                 // Effects props
                 effectsEnabled={effectsEnabled}
                 activeEffectPreset={activeEffectPreset}
+                effectsDistanceMultiplier={effectsDistance}
+                effectsSpeedMultiplier={effectsSpeed}
                 onToggleEffects={handleToggleEffects}
                 onSelectEffectPreset={handleSelectEffectPreset}
+                onEffectsDistanceChange={handleEffectsDistanceChange}
+                onEffectsSpeedChange={handleEffectsSpeedChange}
             />
 
             {/* Fullscreen button — hidden when already fullscreen */}

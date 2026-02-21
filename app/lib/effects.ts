@@ -194,6 +194,9 @@ interface ActiveEffect {
   hsl: [number, number, number];
   age: number;
   preset: EffectPreset;
+  /** Effective values after applying multipliers */
+  effectiveMaxAge: number;
+  effectiveMaxRadius: number;
 }
 
 // ── Utility: RGB → HSL ───────────────────────────────
@@ -242,6 +245,10 @@ export class EffectsEngine {
   private _lastTime = 0;
   private _redraw: () => void;
   private _maxEffects = 80;
+  /** Multiplier for effect reach (0.2–10). Default 1. */
+  private _distanceMultiplier = 1;
+  /** Multiplier for effect speed (0.2–5). Default 1. Higher = faster. */
+  private _speedMultiplier = 1;
   /** Throttle: min cells between triggers during a drag */
   private _lastTrigger: { col: number; row: number; time: number } | null =
     null;
@@ -278,6 +285,22 @@ export class EffectsEngine {
     return this.effects.length > 0;
   }
 
+  get distanceMultiplier(): number {
+    return this._distanceMultiplier;
+  }
+
+  setDistanceMultiplier(v: number): void {
+    this._distanceMultiplier = Math.max(0.2, Math.min(10, v));
+  }
+
+  get speedMultiplier(): number {
+    return this._speedMultiplier;
+  }
+
+  setSpeedMultiplier(v: number): void {
+    this._speedMultiplier = Math.max(0.2, Math.min(5, v));
+  }
+
   // ── Grid management ─────────────────────────────────
 
   updateGrid(cols: number, rows: number): void {
@@ -312,6 +335,15 @@ export class EffectsEngine {
     // Ensure the colour has enough brightness to be visible
     if (hsl[2] < 10) hsl[2] = 30;
 
+    const effectiveMaxAge = Math.max(
+      5,
+      Math.round(this._preset.maxAge / this._speedMultiplier),
+    );
+    const effectiveMaxRadius = Math.max(
+      2,
+      Math.round(this._preset.maxRadius * this._distanceMultiplier),
+    );
+
     this.effects.push({
       col,
       row,
@@ -319,6 +351,8 @@ export class EffectsEngine {
       hsl,
       age: 0,
       preset: this._preset,
+      effectiveMaxAge,
+      effectiveMaxRadius,
     });
 
     // Start animation loop if not running
@@ -382,11 +416,20 @@ export class EffectsEngine {
     buf.fill(0);
 
     // Remove dead effects
-    this.effects = this.effects.filter((e) => e.age < e.preset.maxAge);
+    this.effects = this.effects.filter((e) => e.age < e.effectiveMaxAge);
 
     for (const effect of this.effects) {
-      const { col: ec, row: er, color, hsl, age, preset } = effect;
-      const currentRadius = (age / preset.maxAge) * preset.maxRadius + 2;
+      const {
+        col: ec,
+        row: er,
+        color,
+        hsl,
+        age,
+        preset,
+        effectiveMaxAge,
+        effectiveMaxRadius,
+      } = effect;
+      const currentRadius = (age / effectiveMaxAge) * effectiveMaxRadius + 2;
 
       // Bounding box
       const minC = Math.max(0, Math.floor(ec - currentRadius - 1));
@@ -405,8 +448,8 @@ export class EffectsEngine {
             dy,
             dist,
             age,
-            preset.maxAge,
-            preset.maxRadius,
+            effectiveMaxAge,
+            effectiveMaxRadius,
           );
           if (intensity <= 0.01) continue;
 

@@ -36,8 +36,12 @@ interface ControlPanelProps {
     // Effects
     effectsEnabled: boolean;
     activeEffectPreset: EffectPreset;
+    effectsDistanceMultiplier: number;
+    effectsSpeedMultiplier: number;
     onToggleEffects: () => void;
     onSelectEffectPreset: (preset: EffectPreset) => void;
+    onEffectsDistanceChange: (v: number) => void;
+    onEffectsSpeedChange: (v: number) => void;
 }
 
 const TOOLS: { kind: ToolKind; label: string; shortLabel: string }[] = [
@@ -98,8 +102,12 @@ export default function ControlPanel({
     onAnimFpsChange,
     effectsEnabled,
     activeEffectPreset,
+    effectsDistanceMultiplier,
+    effectsSpeedMultiplier,
     onToggleEffects,
     onSelectEffectPreset,
+    onEffectsDistanceChange,
+    onEffectsSpeedChange,
 }: ControlPanelProps) {
     const [collapsed, setCollapsed] = useState(false);
 
@@ -266,8 +274,12 @@ export default function ControlPanel({
                 <EffectsPanel
                     enabled={effectsEnabled}
                     activePreset={activeEffectPreset}
+                    distanceMultiplier={effectsDistanceMultiplier}
+                    speedMultiplier={effectsSpeedMultiplier}
                     onToggle={onToggleEffects}
                     onSelectPreset={onSelectEffectPreset}
+                    onDistanceChange={onEffectsDistanceChange}
+                    onSpeedChange={onEffectsSpeedChange}
                 />
 
                 {/* Separator */}

@@ -6,8 +6,12 @@ import { EffectPreset, EFFECT_PRESETS } from "../lib/effects";
 interface EffectsPanelProps {
     enabled: boolean;
     activePreset: EffectPreset;
+    distanceMultiplier: number;
+    speedMultiplier: number;
     onToggle: () => void;
     onSelectPreset: (preset: EffectPreset) => void;
+    onDistanceChange: (v: number) => void;
+    onSpeedChange: (v: number) => void;
 }
 
 // Small icon per effect for visual flavour
@@ -75,8 +79,12 @@ function EffectIcon({ name, size = 14 }: { name: string; size?: number }) {
 export default function EffectsPanel({
     enabled,
     activePreset,
+    distanceMultiplier,
+    speedMultiplier,
     onToggle,
     onSelectPreset,
+    onDistanceChange,
+    onSpeedChange,
 }: EffectsPanelProps) {
     const [expanded, setExpanded] = useState(false);
 
@@ -147,6 +155,38 @@ export default function EffectsPanel({
                                         <span className="truncate">{preset.name}</span>
                                     </button>
                                 ))}
+                            </div>
+
+                            {/* Distance slider */}
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-white/40 shrink-0 w-12">Distance</span>
+                                <input
+                                    type="range"
+                                    min={20}
+                                    max={1000}
+                                    value={Math.round(distanceMultiplier * 100)}
+                                    onChange={(e) => onDistanceChange(Number(e.target.value) / 100)}
+                                    className="flex-1 h-1 accent-cyan-500 cursor-pointer"
+                                />
+                                <span className="text-[10px] text-white/60 w-8 text-right">
+                                    {distanceMultiplier.toFixed(1)}x
+                                </span>
+                            </div>
+
+                            {/* Speed slider */}
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-white/40 shrink-0 w-12">Speed</span>
+                                <input
+                                    type="range"
+                                    min={20}
+                                    max={500}
+                                    value={Math.round(speedMultiplier * 100)}
+                                    onChange={(e) => onSpeedChange(Number(e.target.value) / 100)}
+                                    className="flex-1 h-1 accent-cyan-500 cursor-pointer"
+                                />
+                                <span className="text-[10px] text-white/60 w-8 text-right">
+                                    {speedMultiplier.toFixed(1)}x
+                                </span>
                             </div>
 
                             {/* Active effect info */}
