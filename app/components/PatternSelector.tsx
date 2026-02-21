@@ -234,9 +234,9 @@ export default function PatternSelector({
                                 max={6}
                                 value={fontScale}
                                 onChange={(e) => setFontScale(Number(e.target.value))}
-                                className="flex-1 h-1 accent-green-500 cursor-pointer"
+                                className="flex-1 min-w-0 h-1 accent-green-500 cursor-pointer"
                             />
-                            <span className="text-[10px] text-white/60 w-5 text-right">{fontScale}×</span>
+                            <span className="text-[10px] text-white/60 w-5 text-right shrink-0">{fontScale}×</span>
                         </div>
                         <div className="mt-1 text-[9px] text-white/30">
                             {5 * fontScale}×{7 * fontScale}px font · renders centred
@@ -247,8 +247,8 @@ export default function PatternSelector({
                             <button
                                 onClick={() => setTextWrap(true)}
                                 className={`flex-1 rounded px-1.5 py-1.5 text-[10px] transition min-h-8 sm:min-h-0 ${textWrap
-                                        ? "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
-                                        : "bg-white/5 text-white/70 hover:bg-white/10"
+                                    ? "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
+                                    : "bg-white/5 text-white/70 hover:bg-white/10"
                                     }`}
                             >
                                 Wrap
@@ -256,8 +256,8 @@ export default function PatternSelector({
                             <button
                                 onClick={() => setTextWrap(false)}
                                 className={`flex-1 rounded px-1.5 py-1.5 text-[10px] transition min-h-8 sm:min-h-0 ${!textWrap
-                                        ? "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
-                                        : "bg-white/5 text-white/70 hover:bg-white/10"
+                                    ? "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
+                                    : "bg-white/5 text-white/70 hover:bg-white/10"
                                     }`}
                             >
                                 Overflow

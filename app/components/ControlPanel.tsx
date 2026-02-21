@@ -197,7 +197,7 @@ export default function ControlPanel({
             </div>
 
             {/* Scrollable body */}
-            <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 pb-3 space-y-2.5 sm:space-y-3 thin-scrollbar pr-4 sm:pr-5">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 pb-3 space-y-2.5 sm:space-y-3 thin-scrollbar">
                 {/* Grid info */}
                 <div className="text-white/60 text-[10px] sm:text-xs">
                     {gridDims.cols}×{gridDims.rows} ({(gridDims.cols * gridDims.rows).toLocaleString()}{" "}

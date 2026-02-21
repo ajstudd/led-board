@@ -166,9 +166,9 @@ export default function EffectsPanel({
                                     max={1000}
                                     value={Math.round(distanceMultiplier * 100)}
                                     onChange={(e) => onDistanceChange(Number(e.target.value) / 100)}
-                                    className="flex-1 h-1 accent-cyan-500 cursor-pointer"
+                                    className="flex-1 min-w-0 h-1 accent-cyan-500 cursor-pointer"
                                 />
-                                <span className="text-[10px] text-white/60 w-8 text-right">
+                                <span className="text-[10px] text-white/60 w-8 text-right shrink-0">
                                     {distanceMultiplier.toFixed(1)}x
                                 </span>
                             </div>
@@ -182,9 +182,9 @@ export default function EffectsPanel({
                                     max={500}
                                     value={Math.round(speedMultiplier * 100)}
                                     onChange={(e) => onSpeedChange(Number(e.target.value) / 100)}
-                                    className="flex-1 h-1 accent-cyan-500 cursor-pointer"
+                                    className="flex-1 min-w-0 h-1 accent-cyan-500 cursor-pointer"
                                 />
-                                <span className="text-[10px] text-white/60 w-8 text-right">
+                                <span className="text-[10px] text-white/60 w-8 text-right shrink-0">
                                     {speedMultiplier.toFixed(1)}x
                                 </span>
                             </div>

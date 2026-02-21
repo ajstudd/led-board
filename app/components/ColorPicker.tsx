@@ -99,7 +99,7 @@ export default function ColorPicker({
                     value={hexInput}
                     onChange={handleHexChange}
                     placeholder="#ff0000"
-                    className="w-full sm:w-20 rounded bg-white/10 px-2 py-1.5 sm:py-1 text-xs font-mono text-white outline-none focus:ring-1 focus:ring-green-400 min-h-9 sm:min-h-0"
+                    className="flex-1 min-w-0 rounded bg-white/10 px-2 py-1.5 sm:py-1 text-xs font-mono text-white outline-none focus:ring-1 focus:ring-green-400 min-h-9 sm:min-h-0"
                     maxLength={7}
                 />
             </div>

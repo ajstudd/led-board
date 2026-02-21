@@ -163,9 +163,9 @@ export default function AnimationPanel({
                                     max={60}
                                     value={fps}
                                     onChange={(e) => onFpsChange(Number(e.target.value))}
-                                    className="flex-1 h-1 accent-green-500 cursor-pointer"
+                                    className="flex-1 min-w-0 h-1 accent-green-500 cursor-pointer"
                                 />
-                                <span className="text-[10px] text-white/60 w-6 text-right">
+                                <span className="text-[10px] text-white/60 w-6 text-right shrink-0">
                                     {fps}
                                 </span>
                             </div>
