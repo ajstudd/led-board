@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { EffectPreset, EFFECT_PRESETS } from "../lib/effects";
+import InfoTooltip from "./InfoTooltip";
 
 interface EffectsPanelProps {
     enabled: boolean;
@@ -110,29 +111,31 @@ export default function EffectsPanel({
 
             {expanded && (
                 <div className="mt-2 flex flex-col gap-2.5">
-                    {/* Hint */}
-                    <div className="text-[9px] text-white/40 leading-tight">
-                        When enabled, drawing on the board triggers a visual effect at each pixel — like a gaming keyboard.
-                    </div>
 
                     {/* Enable / Disable toggle */}
-                    <button
-                        onClick={onToggle}
-                        className="flex items-center justify-between w-full px-3 py-2 sm:py-1.5 rounded bg-white/5 hover:bg-white/10 transition min-h-9 sm:min-h-0"
-                        role="switch"
-                        aria-checked={enabled}
-                    >
-                        <span className={`text-[11px] font-medium ${enabled ? "text-cyan-300" : "text-white/60"}`}>
-                            {enabled ? "✦ Effects On" : "Effects Off"}
-                        </span>
-                        <span
-                            className={`relative inline-flex h-4 w-8 shrink-0 rounded-full transition-colors duration-200 ${enabled ? "bg-cyan-500" : "bg-white/20"}`}
+                    <div className="flex items-center gap-1.5">
+                        <button
+                            onClick={onToggle}
+                            className="flex-1 flex items-center justify-between px-3 py-2 sm:py-1.5 rounded bg-white/5 hover:bg-white/10 transition min-h-9 sm:min-h-0"
+                            role="switch"
+                            aria-checked={enabled}
                         >
+                            <span className={`text-[11px] font-medium ${enabled ? "text-cyan-300" : "text-white/60"}`}>
+                                {enabled ? "✦ Effects On" : "Effects Off"}
+                            </span>
                             <span
-                                className={`inline-block h-3 w-3 rounded-full bg-white shadow transform transition-transform duration-200 mt-0.5 ${enabled ? "translate-x-4 ml-0.5" : "translate-x-0.5"}`}
-                            />
-                        </span>
-                    </button>
+                                className={`relative inline-flex h-4 w-8 shrink-0 rounded-full transition-colors duration-200 ${enabled ? "bg-cyan-500" : "bg-white/20"}`}
+                            >
+                                <span
+                                    className={`inline-block h-3 w-3 rounded-full bg-white shadow transform transition-transform duration-200 mt-0.5 ${enabled ? "translate-x-4 ml-0.5" : "translate-x-0.5"}`}
+                                />
+                            </span>
+                        </button>
+                        <InfoTooltip title="Pixel Effects" width={210}>
+                            <p>When enabled, drawing triggers a visual effect at each pixel — like a gaming keyboard.</p>
+                            <p className="text-white/40 pt-1">Pick a preset, then draw on the canvas to see it.</p>
+                        </InfoTooltip>
+                    </div>
 
                     {/* Effect presets grid */}
                     {enabled && (
@@ -189,10 +192,6 @@ export default function EffectsPanel({
                                 </span>
                             </div>
 
-                            {/* Active effect info */}
-                            <div className="text-[9px] text-white/30">
-                                {activePreset.name} · Draw anywhere to see the effect
-                            </div>
                         </>
                     )}
                 </div>

@@ -8,6 +8,7 @@ import AnimationPanel from "./AnimationPanel";
 import EffectsPanel from "./EffectsPanel";
 import { AnimationState } from "../lib/animation";
 import { EffectPreset } from "../lib/effects";
+import InfoTooltip from "./InfoTooltip";
 
 interface ControlPanelProps {
     activeTool: ToolKind;
@@ -236,7 +237,7 @@ export default function ControlPanel({
                     <div className="mb-1 text-[10px] uppercase tracking-widest text-white/40">
                         Tools
                     </div>
-                    <div className="flex gap-1 flex-wrap">
+                    <div className="flex gap-1 flex-wrap items-center">
                         {TOOLS.map((t) => (
                             <button
                                 key={t.kind}
@@ -251,6 +252,14 @@ export default function ControlPanel({
                                 <span className="leading-none">{t.shortLabel}</span>
                             </button>
                         ))}
+                        <InfoTooltip title="Tools &amp; Shortcuts" width={200}>
+                            <ul className="flex flex-col gap-1">
+                                <li>✏ Draw — click or drag to paint</li>
+                                <li>◻ Erase — click or drag to erase</li>
+                                <li>◼ Fill — click to flood-fill a region</li>
+                                <li className="pt-0.5 text-white/50"><span className="text-white/70">F</span> fullscreen · <span className="text-white/70">Space</span> pause / play</li>
+                            </ul>
+                        </InfoTooltip>
                     </div>
                 </div>
 
@@ -322,7 +331,7 @@ export default function ControlPanel({
                             <path d="M10 10.5V6a2 2 0 00-2-2 2 2 0 00-2 2v8" />
                             <path d="M18 8a2 2 0 114 0v6a8 8 0 01-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 012.83-2.82L7 15" />
                         </svg>
-                        <span>✋ Gesture Control</span>
+                        <span>Gesture Control</span>
                         {gestureEnabled && (
                             <span className="ml-auto text-purple-400 animate-pulse text-[10px]">● ON</span>
                         )}
@@ -394,11 +403,15 @@ export default function ControlPanel({
                                 </div>
                             )}
 
-                            {/* Hints */}
-                            <div className="text-[9px] text-white/30 leading-relaxed">
-                                ☝ point → cursor &nbsp;·&nbsp; 🤌 pinch = click<br />
-                                ☝🖕 two fingers up = scroll
-                            </div>
+                            {/* Info tooltip */}
+                            <InfoTooltip title="Gesture Controls">
+                                <ul className="flex flex-col gap-1">
+                                    <li>☝ Point finger → moves cursor</li>
+                                    <li>🤌 Pinch → click / draw (hold = drag)</li>
+                                    <li>✌ Two fingers up/down → scroll panel</li>
+                                    <li className="text-white/40 pt-0.5">Enable Pixel Effects for glow on draw</li>
+                                </ul>
+                            </InfoTooltip>
                         </div>
                     )}
                 </div>
@@ -446,15 +459,7 @@ export default function ControlPanel({
                     </div>
                 )}
 
-                {/* Hint */}
-                <div className="text-white/30 text-[10px]">
-                    {activeTool === "draw" && "Click or drag to paint"}
-                    {activeTool === "erase" && "Click or drag to erase"}
-                    {activeTool === "fill" && "Click to flood-fill a region"}
-                </div>
-                <div className="text-white/25 text-[9px] leading-relaxed">
-                    <span className="text-white/35">F</span> fullscreen · <span className="text-white/35">Space</span> pause/play
-                </div>
+
             </div>
         </div>
     );
