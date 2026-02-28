@@ -23,7 +23,7 @@ export interface GridState {
 }
 
 // ----- Tool Types -----
-export type ToolKind = "draw" | "erase" | "fill";
+export type ToolKind = "draw" | "erase" | "fill" | "vibe";
 
 export interface Tool {
   kind: ToolKind;

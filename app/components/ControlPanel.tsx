@@ -108,6 +108,7 @@ const TOOLS: { kind: ToolKind; label: string; shortLabel: string }[] = [
     { kind: "draw", label: "Draw", shortLabel: "Draw" },
     { kind: "erase", label: "Erase", shortLabel: "Erase" },
     { kind: "fill", label: "Fill", shortLabel: "Fill" },
+    { kind: "vibe", label: "Vibe", shortLabel: "Vibe" },
 ];
 
 // SVG icons for tools — compact and crisp
@@ -132,6 +133,14 @@ function ToolIcon({ kind, size = 14 }: { kind: ToolKind; size?: number }) {
                 <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M2.5 10.5l5-9 5 9a5 5 0 01-10 0z" />
                     <path d="M2.5 10.5h10" />
+                </svg>
+            );
+        case "vibe":
+            return (
+                <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="8" cy="8" r="2" />
+                    <path d="M8 1v2M8 13v2M1 8h2M13 8h2" />
+                    <path d="M3.5 3.5l1.5 1.5M11 11l1.5 1.5M3.5 12.5l1.5-1.5M11 5l1.5-1.5" />
                 </svg>
             );
     }
@@ -289,7 +298,9 @@ export default function ControlPanel({
                                 key={t.kind}
                                 onClick={() => onToolChange(t.kind)}
                                 className={`flex items-center gap-1 rounded px-2 py-2 sm:py-1.5 text-[11px] transition shrink-0 min-h-9 sm:min-h-0 ${activeTool === t.kind
-                                    ? "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
+                                    ? t.kind === "vibe"
+                                        ? "bg-fuchsia-500/30 text-fuchsia-300 ring-1 ring-fuchsia-500/50"
+                                        : "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
                                     : "bg-white/5 text-white/70 hover:bg-white/10"
                                     }`}
                                 title={t.label}
@@ -303,6 +314,7 @@ export default function ControlPanel({
                                 <li>✏ Draw — click or drag to paint</li>
                                 <li>◻ Erase — click or drag to erase</li>
                                 <li>◼ Fill — click to flood-fill a region</li>
+                                <li>✦ Vibe — drag for pixel effects only</li>
                                 <li className="pt-0.5 text-white/50"><span className="text-white/70">F</span> fullscreen · <span className="text-white/70">Space</span> pause / play</li>
                             </ul>
                         </InfoTooltip>

@@ -391,6 +391,16 @@ export default function LEDBoard() {
         [replayLayers],
     );
 
+    // ── Tool change handler (auto-enable effects for vibe) ──
+    const handleToolChange = useCallback((tool: ToolKind) => {
+        setActiveTool(tool);
+        if (tool === "vibe" && !effectsEnabled) {
+            setEffectsEnabled(true);
+            effectsRef.current?.setEnabled(true);
+            try { localStorage.setItem(STORAGE_KEY_EFFECTS, "true"); } catch { }
+        }
+    }, [effectsEnabled]);
+
     // ── Undo helpers ───────────────────────────────────
     const pushUndo = useCallback(() => {
         const grid = gridRef.current;
@@ -483,6 +493,10 @@ export default function LEDBoard() {
                         strokeRecorder.recordBulk(before, snapshotRef.current, grid.cols);
                         break;
                     }
+                    case "vibe":
+                        // Vibe mode — trigger visual effects without modifying pixels
+                        effectsRef.current?.trigger(col, row, activeColor);
+                        break;
                 }
 
                 // If paused, update display immediately since no ticks run
@@ -514,6 +528,10 @@ export default function LEDBoard() {
                         strokeRecorder.recordBulk(before, grid.data, grid.cols);
                         break;
                     }
+                    case "vibe":
+                        // Vibe mode — trigger visual effects without modifying pixels
+                        effectsRef.current?.trigger(col, row, activeColor);
+                        break;
                 }
                 canvasHandleRef.current?.redraw();
             }
@@ -531,19 +549,20 @@ export default function LEDBoard() {
     // ── Click callback (applies tool once) ─────────────
     const handleCellClick = useCallback(
         (col: number, row: number) => {
-            if (!strokeActiveRef.current) {
+            if (activeTool !== "vibe" && !strokeActiveRef.current) {
                 pushUndo();
                 strokeActiveRef.current = true;
             }
             applyTool(col, row);
         },
-        [applyTool, pushUndo],
+        [activeTool, applyTool, pushUndo],
     );
 
     // ── Drag callbacks (for draw/erase continuous strokes)
     const handleCellDrag = useCallback(
         (col: number, row: number) => {
             if (activeTool === "fill") return; // fill only on click
+            if (activeTool === "vibe") { applyTool(col, row); return; } // vibe triggers effects on drag
             applyTool(col, row);
         },
         [activeTool, applyTool],
@@ -1019,7 +1038,7 @@ export default function LEDBoard() {
                 settings={settings}
                 gridDims={gridDims}
                 cellInfo={cellInfo}
-                onToolChange={setActiveTool}
+                onToolChange={handleToolChange}
                 onColorChange={setActiveColor}
                 onToggleGrid={toggleGrid}
                 onClear={clearBoard}
