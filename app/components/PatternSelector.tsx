@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { PATTERNS, PatternEntry, gradient } from "../lib/patterns";
 import { RGB } from "../types";
 import { rgbToHex, hexToRgb } from "../lib/utils";
+import InfoTooltip from "./InfoTooltip";
 
 // Tiny canvas to generate pattern thumbnails
 function generateThumbnail(
@@ -227,7 +228,13 @@ export default function PatternSelector({
                             </button>
                         </div>
                         <div className="mt-2 flex items-center gap-2">
-                            <span className="text-[10px] text-white/40 shrink-0">Size</span>
+                            <span className="text-[10px] text-white/40 shrink-0 flex items-center gap-1">
+                                Size
+                                <InfoTooltip>
+                                    <p>{5 * fontScale}×{7 * fontScale}px per character</p>
+                                    <p className="text-white/40 pt-0.5">Renders centred on the grid</p>
+                                </InfoTooltip>
+                            </span>
                             <input
                                 type="range"
                                 min={1}
@@ -237,9 +244,6 @@ export default function PatternSelector({
                                 className="flex-1 min-w-0 h-1 accent-green-500 cursor-pointer"
                             />
                             <span className="text-[10px] text-white/60 w-5 text-right shrink-0">{fontScale}×</span>
-                        </div>
-                        <div className="mt-1 text-[9px] text-white/30">
-                            {5 * fontScale}×{7 * fontScale}px font · renders centred
                         </div>
                         {/* Wrap / Overflow toggle */}
                         <div className="mt-2 flex items-center gap-1.5">
