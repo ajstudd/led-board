@@ -11,6 +11,7 @@ import { ANIMATIONS, MARQUEE_ANIMATION, captureSnapshot, updateSnapshotPixel, se
 import { strokeRecorder } from "../lib/recorder";
 import { uint8ToBase64, base64ToUint8 } from "../lib/utils";
 import { EffectsEngine, EffectPreset, EFFECT_PRESETS, EffectsOverlay } from "../lib/effects";
+import GestureController, { GestureLoadState } from "./GestureController";
 
 const STORAGE_KEY_COLOR = "tenix-color";
 const STORAGE_KEY_TOOL = "tenix-tool";
@@ -55,6 +56,19 @@ export default function LEDBoard() {
     const [activeEffectPreset, setActiveEffectPreset] = useState<EffectPreset>(EFFECT_PRESETS[0]);
     const [effectsDistance, setEffectsDistance] = useState(1);
     const [effectsSpeed, setEffectsSpeed] = useState(1);
+
+    // ── Gesture control state ─────────────────────────
+    const [gestureEnabled, setGestureEnabled] = useState(false);
+    const [gestureCursorScreen, setGestureCursorScreen] = useState<{ x: number; y: number } | null>(null);
+    const [gestureDrawing, setGestureDrawing] = useState(false);
+    const [gestureLoadState, setGestureLoadState] = useState<GestureLoadState>("loading");
+    const [gestureStatusMsg, setGestureStatusMsg] = useState("");
+    const [gesturePinching, setGesturePinching] = useState(false);
+    const [gesturePinchThreshold, setGesturePinchThreshold] = useState(0.08);
+    const [gestureShowCamera, setGestureShowCamera] = useState(true);
+    const gestureVideoRef = useRef<HTMLVideoElement>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
+    const gestureStrokeRef = useRef(false);
 
     // ── Undo stack ──────────────────────────────────────
     const undoStackRef = useRef<Uint8ClampedArray[]>([]);
@@ -542,6 +556,94 @@ export default function LEDBoard() {
         }
     }, [saveGridToStorage]);
 
+    // ── Gesture callbacks ─────────────────────────────
+    // Cursor moved (screen pixels from MediaPipe)
+    const handleGestureCursorMove = useCallback((x: number, y: number) => {
+        setGestureCursorScreen({ x, y });
+        const grid = gridRef.current;
+        if (!grid) return;
+        const col = Math.floor(x / grid.cellSize);
+        const row = Math.floor(y / grid.cellSize);
+        if (grid.inBounds(col, row)) {
+            setCellInfo({ col, row, color: grid.getCell(col, row) });
+        }
+    }, []);
+
+    // Pinch fired at screen (x, y) — click panel elements or draw on canvas
+    const handleGesturePinchAt = useCallback(
+        (x: number, y: number) => {
+            setGestureDrawing(true);
+
+            // ── Check if over the sidebar panel ────────────────────
+            const panelEl = panelRef.current;
+            if (panelEl) {
+                const target = document.elementFromPoint(x, y);
+                if (target && panelEl.contains(target)) {
+                    // Find the closest clickable element and fire a real click
+                    const clickable = (target as HTMLElement).closest(
+                        "button, input, select, textarea, [role='button'], label"
+                    ) as HTMLElement | null;
+                    if (clickable) {
+                        clickable.click();
+                    }
+                    return; // don't draw on canvas
+                }
+            }
+
+            // ── On canvas — draw ─────────────────────────────
+            const grid = gridRef.current;
+            if (!grid) return;
+            const col = Math.floor(x / grid.cellSize);
+            const row = Math.floor(y / grid.cellSize);
+            if (!grid.inBounds(col, row)) return;
+
+            if (!gestureStrokeRef.current) {
+                pushUndo();
+                gestureStrokeRef.current = true;
+            }
+            applyTool(col, row);
+        },
+        [applyTool, pushUndo],
+    );
+
+    // Pinch released
+    const handleGesturePinchRelease = useCallback(() => {
+        setGestureDrawing(false);
+        if (gestureStrokeRef.current) {
+            gestureStrokeRef.current = false;
+            saveGridToStorage();
+        }
+    }, [saveGridToStorage]);
+
+    // Two-finger scroll — scroll the panel body
+    const handleGestureScroll = useCallback((delta: number) => {
+        document.querySelector("[data-gesture-scroll]")?.scrollBy({ top: delta });
+    }, []);
+
+    // Status change from GestureController
+    const handleGestureStatus = useCallback(
+        (state: GestureLoadState, msg: string, pinching: boolean) => {
+            setGestureLoadState(state);
+            setGestureStatusMsg(msg);
+            setGesturePinching(pinching);
+        },
+        [],
+    );
+
+    const handleToggleGesture = useCallback(() => {
+        setGestureEnabled((prev) => {
+            if (prev) {
+                setGestureCursorScreen(null);
+                setGestureDrawing(false);
+            }
+            return !prev;
+        });
+    }, []);
+
+    const handleGesturePinchThresholdChange = useCallback((v: number) => {
+        setGesturePinchThreshold(v);
+    }, []);
+
     // ── Toggle grid lines ─────────────────────────────────
     const toggleGrid = useCallback(() => {
         setSettings((prev) => {
@@ -863,6 +965,44 @@ export default function LEDBoard() {
                 onGridResize={handleGridResize}
             />
 
+            {/* Gesture cursor overlay */}
+            {gestureEnabled && gestureCursorScreen && (() => {
+                const cs = settings.cellSize;
+                const col = Math.floor(gestureCursorScreen.x / cs);
+                const row = Math.floor(gestureCursorScreen.y / cs);
+                return (
+                    <div
+                        className="fixed pointer-events-none z-20 rounded-sm transition-[border-color,box-shadow]"
+                        style={{
+                            left: col * cs - 1,
+                            top: row * cs - 1,
+                            width: cs + 2,
+                            height: cs + 2,
+                            border: `2px solid ${gestureDrawing
+                                    ? "rgba(250,204,21,0.95)"
+                                    : "rgba(192,132,252,0.8)"
+                                }`,
+                            boxShadow: gestureDrawing
+                                ? "0 0 10px rgba(250,204,21,0.5), 0 0 4px rgba(250,204,21,0.8)"
+                                : "0 0 8px rgba(192,132,252,0.4)",
+                        }}
+                    />
+                );
+            })()}
+
+            {/* Gesture controller (camera + MediaPipe, renders null) */}
+            {gestureEnabled && (
+                <GestureController
+                    videoRef={gestureVideoRef}
+                    pinchThreshold={gesturePinchThreshold}
+                    onCursorMove={handleGestureCursorMove}
+                    onPinchAt={handleGesturePinchAt}
+                    onPinchRelease={handleGesturePinchRelease}
+                    onScroll={handleGestureScroll}
+                    onStatusChange={handleGestureStatus}
+                />
+            )}
+
             {/* Control Panel */}
             <ControlPanel
                 activeTool={activeTool}
@@ -897,6 +1037,18 @@ export default function LEDBoard() {
                 onSelectEffectPreset={handleSelectEffectPreset}
                 onEffectsDistanceChange={handleEffectsDistanceChange}
                 onEffectsSpeedChange={handleEffectsSpeedChange}
+                // Gesture props
+                gestureEnabled={gestureEnabled}
+                onToggleGesture={handleToggleGesture}
+                gestureVideoRef={gestureVideoRef}
+                gestureLoadState={gestureLoadState}
+                gestureStatusMsg={gestureStatusMsg}
+                gesturePinching={gesturePinching}
+                gesturePinchThreshold={gesturePinchThreshold}
+                onGesturePinchThresholdChange={handleGesturePinchThresholdChange}
+                gestureShowCamera={gestureShowCamera}
+                onToggleGestureCamera={() => setGestureShowCamera((v) => !v)}
+                panelRef={panelRef}
             />
 
             {/* Fullscreen button — hidden when already fullscreen */}

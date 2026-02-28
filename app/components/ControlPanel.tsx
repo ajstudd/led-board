@@ -42,6 +42,19 @@ interface ControlPanelProps {
     onSelectEffectPreset: (preset: EffectPreset) => void;
     onEffectsDistanceChange: (v: number) => void;
     onEffectsSpeedChange: (v: number) => void;
+    // Gesture
+    gestureEnabled: boolean;
+    onToggleGesture: () => void;
+    gestureVideoRef: React.RefObject<HTMLVideoElement | null>;
+    gestureLoadState: "loading" | "ready" | "error";
+    gestureStatusMsg: string;
+    gesturePinching: boolean;
+    gesturePinchThreshold: number;
+    onGesturePinchThresholdChange: (v: number) => void;
+    gestureShowCamera: boolean;
+    onToggleGestureCamera: () => void;
+    /** Forwarded ref so LEDBoard can hit-test pinch events against the panel */
+    panelRef: React.RefObject<HTMLDivElement | null>;
 }
 
 const TOOLS: { kind: ToolKind; label: string; shortLabel: string }[] = [
@@ -108,6 +121,17 @@ export default function ControlPanel({
     onSelectEffectPreset,
     onEffectsDistanceChange,
     onEffectsSpeedChange,
+    gestureEnabled,
+    onToggleGesture,
+    gestureVideoRef,
+    gestureLoadState,
+    gestureStatusMsg,
+    gesturePinching,
+    gesturePinchThreshold,
+    onGesturePinchThresholdChange,
+    gestureShowCamera,
+    onToggleGestureCamera,
+    panelRef,
 }: ControlPanelProps) {
     const [collapsed, setCollapsed] = useState(false);
 
@@ -179,7 +203,7 @@ export default function ControlPanel({
     }
 
     return (
-        <div className="panel-slide-in fixed top-2 left-2 sm:top-4 sm:left-4 z-10 flex flex-col rounded-xl bg-black/80 text-xs text-white font-mono backdrop-blur-md select-none pointer-events-auto shadow-lg shadow-black/40 border border-white/5 w-[calc(100vw-1rem)] xs:w-56 sm:w-56 max-w-[16rem] max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] overflow-hidden">
+        <div ref={panelRef} className="panel-slide-in fixed top-2 left-2 sm:top-4 sm:left-4 z-10 flex flex-col rounded-xl bg-black/80 text-xs text-white font-mono backdrop-blur-md select-none pointer-events-auto shadow-lg shadow-black/40 border border-white/5 w-[calc(100vw-1rem)] xs:w-56 sm:w-56 max-w-[16rem] max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] overflow-hidden">
             {/* Header — always visible, not scrollable */}
             <div className="flex items-center justify-between px-3 sm:px-4 pt-2 sm:pt-3 pb-1.5 sm:pb-2 shrink-0">
                 <div className="text-sm font-semibold tracking-wide text-green-400">
@@ -197,7 +221,7 @@ export default function ControlPanel({
             </div>
 
             {/* Scrollable body */}
-            <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 pb-3 space-y-2.5 sm:space-y-3 thin-scrollbar">
+            <div data-gesture-scroll className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 pb-3 space-y-2.5 sm:space-y-3 thin-scrollbar">
                 {/* Grid info */}
                 <div className="text-white/60 text-[10px] sm:text-xs">
                     {gridDims.cols}×{gridDims.rows} ({(gridDims.cols * gridDims.rows).toLocaleString()}{" "}
@@ -281,6 +305,103 @@ export default function ControlPanel({
                     onDistanceChange={onEffectsDistanceChange}
                     onSpeedChange={onEffectsSpeedChange}
                 />
+
+                {/* Separator */}
+                <div className="h-px bg-white/10" />
+
+                {/* Gesture Control */}
+                <div className="flex flex-col gap-1.5">
+                    {/* Toggle row */}
+                    <button
+                        onClick={onToggleGesture}
+                        className="w-full rounded bg-white/10 px-2 py-2 sm:py-1.5 text-xs hover:bg-white/20 transition text-left min-h-9 sm:min-h-0 flex items-center gap-2"
+                    >
+                        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity={0.7}>
+                            <path d="M18 11V6a2 2 0 00-2-2 2 2 0 00-2 2" />
+                            <path d="M14 10V4a2 2 0 00-2-2 2 2 0 00-2 2v2" />
+                            <path d="M10 10.5V6a2 2 0 00-2-2 2 2 0 00-2 2v8" />
+                            <path d="M18 8a2 2 0 114 0v6a8 8 0 01-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 012.83-2.82L7 15" />
+                        </svg>
+                        <span>✋ Gesture Control</span>
+                        {gestureEnabled && (
+                            <span className="ml-auto text-purple-400 animate-pulse text-[10px]">● ON</span>
+                        )}
+                    </button>
+
+                    {gestureEnabled && (
+                        <div className="flex flex-col gap-1.5 pl-1">
+                            {/* Status pill */}
+                            <div className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[10px] font-mono border ${gestureLoadState === "ready"
+                                ? "bg-purple-950/60 border-purple-500/30 text-purple-200"
+                                : gestureLoadState === "error"
+                                    ? "bg-red-950/60 border-red-500/30 text-red-300"
+                                    : "bg-black/40 border-white/10 text-white/40"
+                                }`}>
+                                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${gestureLoadState === "ready"
+                                    ? gesturePinching ? "bg-yellow-400 animate-ping" : "bg-purple-400 animate-pulse"
+                                    : gestureLoadState === "error" ? "bg-red-400" : "bg-blue-400 animate-pulse"
+                                    }`} />
+                                <span className="flex-1 truncate">{gestureStatusMsg}</span>
+                                {/* Camera toggle */}
+                                {gestureLoadState === "ready" && (
+                                    <button
+                                        onClick={onToggleGestureCamera}
+                                        className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[9px] transition shrink-0"
+                                        title={gestureShowCamera ? "Hide camera" : "Show camera"}
+                                    >
+                                        {gestureShowCamera ? "hide cam" : "show cam"}
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Camera preview — video element lives here (always in DOM) */}
+                            <div className={`relative rounded-lg overflow-hidden border transition-all duration-200 ${gestureShowCamera ? "h-28" : "h-0 opacity-0 pointer-events-none"
+                                } ${gestureLoadState === "ready"
+                                    ? gesturePinching ? "border-yellow-500/50" : "border-purple-500/30"
+                                    : "border-white/10"
+                                }`}>
+                                <video
+                                    ref={gestureVideoRef}
+                                    className="block w-full h-full object-cover"
+                                    style={{ transform: "scaleX(-1)" }}
+                                    muted
+                                    playsInline
+                                />
+                                {gestureLoadState !== "ready" && gestureShowCamera && (
+                                    <div className="absolute inset-0 bg-black/75 flex items-center justify-center text-[9px] text-white/50 font-mono px-2 text-center leading-tight">
+                                        {gestureStatusMsg}
+                                    </div>
+                                )}
+                                {gestureLoadState === "ready" && (
+                                    <div className="absolute top-1 left-1 text-[7px] text-white/30 bg-black/50 rounded px-1 font-mono">LIVE</div>
+                                )}
+                                {gesturePinching && (
+                                    <div className="absolute inset-0 border-2 border-yellow-400/50 rounded-lg pointer-events-none animate-pulse" />
+                                )}
+                            </div>
+
+                            {/* Pinch sensitivity */}
+                            {gestureLoadState === "ready" && (
+                                <div className="flex items-center gap-2 text-[9px] text-white/40">
+                                    <span className="shrink-0">Pinch sens</span>
+                                    <input
+                                        type="range" min={3} max={15} step={1}
+                                        value={Math.round(gesturePinchThreshold * 100)}
+                                        onChange={(e) => onGesturePinchThresholdChange(parseInt(e.target.value) / 100)}
+                                        className="flex-1 accent-purple-400 cursor-pointer"
+                                    />
+                                    <span className="w-4 text-right">{Math.round(gesturePinchThreshold * 100)}</span>
+                                </div>
+                            )}
+
+                            {/* Hints */}
+                            <div className="text-[9px] text-white/30 leading-relaxed">
+                                ☝ point → cursor &nbsp;·&nbsp; 🤌 pinch = click<br />
+                                ☝🖕 two fingers up = scroll
+                            </div>
+                        </div>
+                    )}
+                </div>
 
                 {/* Separator */}
                 <div className="h-px bg-white/10" />
