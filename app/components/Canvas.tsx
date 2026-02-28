@@ -49,7 +49,13 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
     const cursorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [cursorHidden, setCursorHidden] = useState(false);
 
-    // ── Draw the grid onto the canvas ─────────────────────
+    // Offscreen buffers for fast ImageData-based rendering
+    const cellCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const effectsCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const gridLinesCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const gridLinesDimsRef = useRef<{ cols: number; rows: number; cellSize: number; show: boolean } | null>(null);
+
+    // ── Draw the grid onto the canvas (ImageData fast-path) ──
     const drawGrid = useCallback(() => {
         const canvas = canvasRef.current;
         const grid = gridRef.current;
@@ -60,66 +66,110 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
 
         const { cols, rows, cellSize } = grid.dimensions;
         const data = grid.data;
-
-        // Fill background
         const bg = settings.backgroundColor;
-        ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        // Draw each cell
-        for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-                const i = (r * cols + c) * 3;
-                const red = data[i];
-                const green = data[i + 1];
-                const blue = data[i + 2];
+        // -- 1. Ensure offscreen cell canvas is the right size --
+        let cellCanvas = cellCanvasRef.current;
+        if (!cellCanvas || cellCanvas.width !== cols || cellCanvas.height !== rows) {
+            cellCanvas = document.createElement("canvas");
+            cellCanvas.width = cols;
+            cellCanvas.height = rows;
+            cellCanvasRef.current = cellCanvas;
+        }
+        const cellCtx = cellCanvas.getContext("2d", { willReadFrequently: true })!;
+        const imgData = cellCtx.createImageData(cols, rows);
+        const px = imgData.data; // Uint8ClampedArray RGBA
 
-                // Skip black cells (same as background) for perf
-                if (red === 0 && green === 0 && blue === 0) continue;
-
-                ctx.fillStyle = `rgb(${red},${green},${blue})`;
-                ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+        // -- 2. Convert RGB grid data -> RGBA ImageData (single pass) --
+        for (let i = 0, j = 0, n = cols * rows; i < n; i++, j += 4) {
+            const si = i * 3;
+            const r = data[si];
+            const g = data[si + 1];
+            const b = data[si + 2];
+            if (r === 0 && g === 0 && b === 0) {
+                px[j] = bg[0];
+                px[j + 1] = bg[1];
+                px[j + 2] = bg[2];
+            } else {
+                px[j] = r;
+                px[j + 1] = g;
+                px[j + 2] = b;
             }
+            px[j + 3] = 255;
+        }
+        cellCtx.putImageData(imgData, 0, 0);
+
+        // -- 3. Draw scaled-up cell canvas with nearest-neighbor --
+        ctx.imageSmoothingEnabled = false;
+        const dw = cols * cellSize;
+        const dh = rows * cellSize;
+        ctx.drawImage(cellCanvas, 0, 0, dw, dh);
+
+        // Fill any remaining space (right / bottom edges beyond the grid)
+        const cw = canvas.width;
+        const ch = canvas.height;
+        if (dw < cw || dh < ch) {
+            ctx.fillStyle = `rgb(${bg[0]},${bg[1]},${bg[2]})`;
+            if (dw < cw) ctx.fillRect(dw, 0, cw - dw, ch);
+            if (dh < ch) ctx.fillRect(0, dh, dw, ch - dh);
         }
 
-        // Draw grid lines
+        // -- 4. Grid lines (cached in offscreen canvas) --
         if (settings.showGrid) {
-            const gc = settings.gridColor;
-            ctx.strokeStyle = `rgba(${gc[0]},${gc[1]},${gc[2]},0.3)`;
-            ctx.lineWidth = 0.5;
-
-            // Vertical lines
-            for (let c = 0; c <= cols; c++) {
-                const x = c * cellSize;
-                ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, rows * cellSize);
-                ctx.stroke();
+            const dims = gridLinesDimsRef.current;
+            if (
+                !gridLinesCanvasRef.current ||
+                !dims ||
+                dims.cols !== cols ||
+                dims.rows !== rows ||
+                dims.cellSize !== cellSize ||
+                dims.show !== true
+            ) {
+                const glCanvas = document.createElement("canvas");
+                glCanvas.width = dw;
+                glCanvas.height = dh;
+                const glCtx = glCanvas.getContext("2d")!;
+                const gc = settings.gridColor;
+                glCtx.strokeStyle = `rgba(${gc[0]},${gc[1]},${gc[2]},0.3)`;
+                glCtx.lineWidth = 0.5;
+                glCtx.beginPath();
+                for (let c = 0; c <= cols; c++) {
+                    const x = c * cellSize;
+                    glCtx.moveTo(x, 0);
+                    glCtx.lineTo(x, dh);
+                }
+                for (let r = 0; r <= rows; r++) {
+                    const y = r * cellSize;
+                    glCtx.moveTo(0, y);
+                    glCtx.lineTo(dw, y);
+                }
+                glCtx.stroke();
+                gridLinesCanvasRef.current = glCanvas;
+                gridLinesDimsRef.current = { cols, rows, cellSize, show: true };
             }
-
-            // Horizontal lines
-            for (let r = 0; r <= rows; r++) {
-                const y = r * cellSize;
-                ctx.beginPath();
-                ctx.moveTo(0, y);
-                ctx.lineTo(cols * cellSize, y);
-                ctx.stroke();
-            }
+            ctx.drawImage(gridLinesCanvasRef.current, 0, 0);
+        } else {
+            gridLinesDimsRef.current = null;
         }
 
-        // ── Draw effects overlay (additive blend) ─────────
+        // -- 5. Effects overlay (ImageData fast-path, additive blend) --
         const overlay = effectsOverlayRef?.current;
         if (overlay?.buffer && overlay.cols > 0) {
-            ctx.globalCompositeOperation = "lighter";
-            for (let r = 0; r < Math.min(rows, overlay.rows); r++) {
-                for (let c = 0; c < Math.min(cols, overlay.cols); c++) {
-                    const oi = (r * overlay.cols + c) * 4;
-                    const alpha = overlay.buffer[oi + 3];
-                    if (alpha === 0) continue;
-                    ctx.fillStyle = `rgba(${overlay.buffer[oi]},${overlay.buffer[oi + 1]},${overlay.buffer[oi + 2]},${alpha / 255})`;
-                    ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
-                }
+            let eCanvas = effectsCanvasRef.current;
+            if (!eCanvas || eCanvas.width !== overlay.cols || eCanvas.height !== overlay.rows) {
+                eCanvas = document.createElement("canvas");
+                eCanvas.width = overlay.cols;
+                eCanvas.height = overlay.rows;
+                effectsCanvasRef.current = eCanvas;
             }
+            const eCtx = eCanvas.getContext("2d", { willReadFrequently: true })!;
+            const eImg = eCtx.createImageData(overlay.cols, overlay.rows);
+            eImg.data.set(overlay.buffer); // direct copy — same RGBA layout
+            eCtx.putImageData(eImg, 0, 0);
+
+            ctx.globalCompositeOperation = "lighter";
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(eCanvas, 0, 0, dw, dh);
             ctx.globalCompositeOperation = "source-over";
         }
     }, [gridRef, effectsOverlayRef, settings]);

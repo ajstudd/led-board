@@ -1,5 +1,5 @@
 import { AnimationConfig } from "../types";
-import { hslToRgb } from "./utils";
+import { hslToRgb, hslToRgbInto } from "./utils";
 import { strokeRecorder, StrokeEntry } from "./recorder";
 
 /**
@@ -56,11 +56,12 @@ function pulseTick(
   if (!snapshot) return;
   const t = (Math.sin(frame * 0.1) + 1) / 2; // 0..1
   const brightness = 0.1 + t * 0.9;
+  const len = data.length;
 
-  for (let i = 0; i < data.length; i += 3) {
-    data[i] = Math.floor(snapshot[i] * brightness);
-    data[i + 1] = Math.floor(snapshot[i + 1] * brightness);
-    data[i + 2] = Math.floor(snapshot[i + 2] * brightness);
+  for (let i = 0; i < len; i += 3) {
+    data[i] = snapshot[i] * brightness; // Uint8ClampedArray auto-rounds
+    data[i + 1] = snapshot[i + 1] * brightness;
+    data[i + 2] = snapshot[i + 2] * brightness;
   }
 }
 
@@ -75,24 +76,22 @@ function rainbowCycleTick(
   frame: number,
 ) {
   if (!snapshot) return;
+  const frameHueOff = (frame * 3) % 360;
+  // Clear once, then fill lit pixels only
+  data.fill(0);
   for (let r = 0; r < rows; r++) {
+    const rowOff = r * cols;
+    const rowHue = (r + frameHueOff) % 360; // hue offset for this row
     for (let c = 0; c < cols; c++) {
-      const i = (r * cols + c) * 3;
-      if (isLit(snapshot, i)) {
+      const i = (rowOff + c) * 3;
+      if (snapshot[i] > 5 || snapshot[i + 1] > 5 || snapshot[i + 2] > 5) {
         const lum =
           (snapshot[i] * 0.299 +
             snapshot[i + 1] * 0.587 +
             snapshot[i + 2] * 0.114) /
           255;
-        const hue = (c + r + frame * 3) % 360;
-        const [rr, gg, bb] = hslToRgb(hue, 100, Math.max(15, lum * 50));
-        data[i] = rr;
-        data[i + 1] = gg;
-        data[i + 2] = bb;
-      } else {
-        data[i] = 0;
-        data[i + 1] = 0;
-        data[i + 2] = 0;
+        const hue = (c + rowHue) % 360;
+        hslToRgbInto(hue, 100, lum * 50 < 15 ? 15 : lum * 50, data, i);
       }
     }
   }
@@ -158,15 +157,13 @@ function scrollUpTick(
 ) {
   if (!snapshot) return;
   const offset = frame % rows;
+  const rowBytes = cols * 3;
+  // Copy rows in bulk using subarray
   for (let r = 0; r < rows; r++) {
     const srcRow = (r + offset) % rows;
-    for (let c = 0; c < cols; c++) {
-      const si = (srcRow * cols + c) * 3;
-      const di = (r * cols + c) * 3;
-      data[di] = snapshot[si];
-      data[di + 1] = snapshot[si + 1];
-      data[di + 2] = snapshot[si + 2];
-    }
+    const si = srcRow * rowBytes;
+    const di = r * rowBytes;
+    data.set(snapshot.subarray(si, si + rowBytes), di);
   }
 }
 
@@ -182,15 +179,12 @@ function scrollDownTick(
 ) {
   if (!snapshot) return;
   const offset = frame % rows;
+  const rowBytes = cols * 3;
   for (let r = 0; r < rows; r++) {
     const srcRow = (((r - offset) % rows) + rows) % rows;
-    for (let c = 0; c < cols; c++) {
-      const si = (srcRow * cols + c) * 3;
-      const di = (r * cols + c) * 3;
-      data[di] = snapshot[si];
-      data[di + 1] = snapshot[si + 1];
-      data[di + 2] = snapshot[si + 2];
-    }
+    const si = srcRow * rowBytes;
+    const di = r * rowBytes;
+    data.set(snapshot.subarray(si, si + rowBytes), di);
   }
 }
 
@@ -217,6 +211,11 @@ function blinkTick(
 //  7. Glow — radiating glow from each lit pixel
 // ═══════════════════════════════════════════════════════
 
+// Scratch arrays reused across glow frames
+let _glowLitCols: Int32Array | null = null;
+let _glowLitRows: Int32Array | null = null;
+let _glowLitCount = 0;
+
 function glowTick(
   cols: number,
   rows: number,
@@ -225,40 +224,69 @@ function glowTick(
 ) {
   if (!snapshot) return;
   const pulse = (Math.sin(frame * 0.12) + 1) / 2;
-  const glowRadius = 1 + Math.floor(pulse * 3);
+  const glowRadius = (1 + pulse * 3) | 0;
+  const glowRadiusSq = glowRadius * glowRadius;
+  const invGlowP1 = 1 / (glowRadius + 1);
 
   data.fill(0);
 
+  const total = cols * rows;
+  // Pre-scan lit pixels into reusable typed arrays
+  if (!_glowLitCols || _glowLitCols.length < total) {
+    _glowLitCols = new Int32Array(total);
+    _glowLitRows = new Int32Array(total);
+  }
+  _glowLitCount = 0;
   for (let r = 0; r < rows; r++) {
+    const rowOff = r * cols;
     for (let c = 0; c < cols; c++) {
-      const si = (r * cols + c) * 3;
-      if (!isLit(snapshot, si)) continue;
+      const si = (rowOff + c) * 3;
+      if (snapshot[si] > 5 || snapshot[si + 1] > 5 || snapshot[si + 2] > 5) {
+        _glowLitCols![_glowLitCount] = c;
+        _glowLitRows![_glowLitCount] = r;
+        _glowLitCount++;
+      }
+    }
+  }
 
-      for (let dr = -glowRadius; dr <= glowRadius; dr++) {
-        for (let dc = -glowRadius; dc <= glowRadius; dc++) {
-          const nr = r + dr;
-          const nc = c + dc;
-          if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+  // Pre-compute falloff table for integer distances 0..glowRadius
+  // Using sqrt of integer squared distances
+  const falloffSq = new Float32Array(glowRadiusSq + 1);
+  for (let dsq = 0; dsq <= glowRadiusSq; dsq++) {
+    const dist = Math.sqrt(dsq);
+    if (dist <= glowRadius) {
+      falloffSq[dsq] = 1 - dist * invGlowP1;
+    }
+  }
 
-          const dist = Math.sqrt(dr * dr + dc * dc);
-          if (dist > glowRadius) continue;
+  for (let k = 0; k < _glowLitCount; k++) {
+    const pc = _glowLitCols![k];
+    const pr = _glowLitRows![k];
+    const si = (pr * cols + pc) * 3;
+    const sr = snapshot[si];
+    const sg = snapshot[si + 1];
+    const sb = snapshot[si + 2];
 
-          const falloff = 1 - dist / (glowRadius + 1);
-          const di = (nr * cols + nc) * 3;
+    const rMin = pr - glowRadius < 0 ? 0 : pr - glowRadius;
+    const rMax = pr + glowRadius >= rows ? rows - 1 : pr + glowRadius;
+    const cMin = pc - glowRadius < 0 ? 0 : pc - glowRadius;
+    const cMax = pc + glowRadius >= cols ? cols - 1 : pc + glowRadius;
 
-          data[di] = Math.min(
-            255,
-            data[di] + Math.floor(snapshot[si] * falloff),
-          );
-          data[di + 1] = Math.min(
-            255,
-            data[di + 1] + Math.floor(snapshot[si + 1] * falloff),
-          );
-          data[di + 2] = Math.min(
-            255,
-            data[di + 2] + Math.floor(snapshot[si + 2] * falloff),
-          );
-        }
+    for (let nr = rMin; nr <= rMax; nr++) {
+      const dr = nr - pr;
+      const dr2 = dr * dr;
+      const rowOff2 = nr * cols;
+      for (let nc = cMin; nc <= cMax; nc++) {
+        const dc = nc - pc;
+        const dsq = dr2 + dc * dc;
+        if (dsq > glowRadiusSq) continue;
+
+        const falloff = falloffSq[dsq];
+        const di = (rowOff2 + nc) * 3;
+        // Uint8ClampedArray auto-clamps to [0,255]
+        data[di] = data[di] + sr * falloff;
+        data[di + 1] = data[di + 1] + sg * falloff;
+        data[di + 2] = data[di + 2] + sb * falloff;
       }
     }
   }
@@ -268,6 +296,12 @@ function glowTick(
 //  8. Color Wave — washes a rainbow wave over lit pixels
 // ═══════════════════════════════════════════════════════
 
+// Reusable per-column hue / wave tables for colorWaveTick
+let _cwHueR: Float32Array | null = null;
+let _cwHueG: Float32Array | null = null;
+let _cwHueB: Float32Array | null = null;
+let _cwWave: Float32Array | null = null;
+
 function colorWaveTick(
   cols: number,
   rows: number,
@@ -275,20 +309,35 @@ function colorWaveTick(
   frame: number,
 ) {
   if (!snapshot) return;
+
+  // Pre-compute per-column hue colour and wave factor (constant across rows)
+  if (!_cwHueR || _cwHueR.length < cols) {
+    _cwHueR = new Float32Array(cols);
+    _cwHueG = new Float32Array(cols);
+    _cwHueB = new Float32Array(cols);
+    _cwWave = new Float32Array(cols);
+  }
+  const f2 = frame * 2;
+  for (let c = 0; c < cols; c++) {
+    const hue = (c + f2) % 360;
+    const rgb = hslToRgb(hue, 100, 50);
+    _cwHueR![c] = rgb[0];
+    _cwHueG![c] = rgb[1];
+    _cwHueB![c] = rgb[2];
+    _cwWave![c] = (Math.sin((c - f2) * 0.15) + 1) * 0.5;
+  }
+
+  data.fill(0); // clear once
   for (let r = 0; r < rows; r++) {
+    const rowOff = r * cols;
     for (let c = 0; c < cols; c++) {
-      const i = (r * cols + c) * 3;
-      if (isLit(snapshot, i)) {
-        const wave = (Math.sin((c - frame * 2) * 0.15) + 1) / 2;
-        const hue = (c + frame * 2) % 360;
-        const [hr, hg, hb] = hslToRgb(hue, 100, 50);
-        data[i] = Math.floor(snapshot[i] * (1 - wave) + hr * wave);
-        data[i + 1] = Math.floor(snapshot[i + 1] * (1 - wave) + hg * wave);
-        data[i + 2] = Math.floor(snapshot[i + 2] * (1 - wave) + hb * wave);
-      } else {
-        data[i] = 0;
-        data[i + 1] = 0;
-        data[i + 2] = 0;
+      const i = (rowOff + c) * 3;
+      if (snapshot[i] > 5 || snapshot[i + 1] > 5 || snapshot[i + 2] > 5) {
+        const w = _cwWave![c];
+        const invW = 1 - w;
+        data[i] = snapshot[i] * invW + _cwHueR![c] * w;
+        data[i + 1] = snapshot[i + 1] * invW + _cwHueG![c] * w;
+        data[i + 2] = snapshot[i + 2] * invW + _cwHueB![c] * w;
       }
     }
   }
@@ -366,17 +415,15 @@ function invertFlashTick(
   frame: number,
 ) {
   if (!snapshot) return;
-  const invert = Math.floor(frame / 15) % 2 === 1;
+  const invert = ((frame / 15) | 0) & 1;
 
-  for (let i = 0; i < data.length; i += 3) {
-    if (invert) {
+  if (!invert) {
+    data.set(snapshot);
+  } else {
+    for (let i = 0, len = data.length; i < len; i += 3) {
       data[i] = 255 - snapshot[i];
       data[i + 1] = 255 - snapshot[i + 1];
       data[i + 2] = 255 - snapshot[i + 2];
-    } else {
-      data[i] = snapshot[i];
-      data[i + 1] = snapshot[i + 1];
-      data[i + 2] = snapshot[i + 2];
     }
   }
 }
@@ -406,11 +453,11 @@ function matrixRevealTick(
     }
   }
 
-  // Start with dimmed snapshot
-  for (let i = 0; i < data.length; i += 3) {
-    data[i] = Math.floor(snapshot[i] * 0.3);
-    data[i + 1] = Math.floor(snapshot[i + 1] * 0.3);
-    data[i + 2] = Math.floor(snapshot[i + 2] * 0.3);
+  // Start with dimmed snapshot — Uint8ClampedArray auto-rounds
+  for (let i = 0, len = data.length; i < len; i += 3) {
+    data[i] = snapshot[i] * 0.3;
+    data[i + 1] = snapshot[i + 1] * 0.3;
+    data[i + 2] = snapshot[i + 2] * 0.3;
   }
 
   for (let c = 0; c < cols; c++) {

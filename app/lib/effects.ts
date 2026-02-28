@@ -412,36 +412,54 @@ export class EffectsEngine {
     const buf = this._overlay.buffer;
     if (!buf) return;
 
+    const cols = this._cols;
+
     // Clear overlay
     buf.fill(0);
 
-    // Remove dead effects
-    this.effects = this.effects.filter((e) => e.age < e.effectiveMaxAge);
+    // Remove dead effects (in-place for less GC pressure)
+    let writeIdx = 0;
+    for (let i = 0; i < this.effects.length; i++) {
+      if (this.effects[i].age < this.effects[i].effectiveMaxAge) {
+        this.effects[writeIdx++] = this.effects[i];
+      }
+    }
+    this.effects.length = writeIdx;
 
-    for (const effect of this.effects) {
-      const {
-        col: ec,
-        row: er,
-        color,
-        hsl,
-        age,
-        preset,
-        effectiveMaxAge,
-        effectiveMaxRadius,
-      } = effect;
+    for (let ei = 0; ei < this.effects.length; ei++) {
+      const effect = this.effects[ei];
+      const ec = effect.col;
+      const er = effect.row;
+      const color = effect.color;
+      const hsl = effect.hsl;
+      const age = effect.age;
+      const preset = effect.preset;
+      const effectiveMaxAge = effect.effectiveMaxAge;
+      const effectiveMaxRadius = effect.effectiveMaxRadius;
       const currentRadius = (age / effectiveMaxAge) * effectiveMaxRadius + 2;
+      const hasHueShift = !!preset.hueShift;
 
-      // Bounding box
-      const minC = Math.max(0, Math.floor(ec - currentRadius - 1));
-      const maxC = Math.min(this._cols - 1, Math.ceil(ec + currentRadius + 1));
-      const minR = Math.max(0, Math.floor(er - currentRadius - 1));
-      const maxR = Math.min(this._rows - 1, Math.ceil(er + currentRadius + 1));
+      // Tight bounding box
+      const minC = Math.max(0, (ec - currentRadius - 1) | 0);
+      const maxC = Math.min(cols - 1, (ec + currentRadius + 2) | 0);
+      const minR = Math.max(0, (er - currentRadius - 1) | 0);
+      const maxR = Math.min(this._rows - 1, (er + currentRadius + 2) | 0);
+
+      // Pre-extract non-shifted colour
+      const cr = color[0];
+      const cg = color[1];
+      const cb = color[2];
+      const hH = hsl[0];
+      const hS = hsl[1];
+      const hL = Math.max(hsl[2], 30);
 
       for (let r = minR; r <= maxR; r++) {
+        const dy = r - er;
+        const dy2 = dy * dy;
+        const rowOff = r * cols;
         for (let c = minC; c <= maxC; c++) {
           const dx = c - ec;
-          const dy = r - er;
-          const dist = Math.sqrt(dx * dx + dy * dy);
+          const dist = Math.sqrt(dx * dx + dy2);
 
           const intensity = preset.intensity(
             dx,
@@ -455,25 +473,24 @@ export class EffectsEngine {
 
           // Compute colour — optionally hue-shifted
           let pr: number, pg: number, pb: number;
-          if (preset.hueShift) {
-            const shift = preset.hueShift(dist, age);
-            const [h, s, l] = hsl;
-            const shifted = hslToRgb((h + shift) % 360, s, Math.max(l, 30));
+          if (hasHueShift) {
+            const shift = preset.hueShift!(dist, age);
+            const shifted = hslToRgb((hH + shift) % 360, hS, hL);
             pr = shifted[0];
             pg = shifted[1];
             pb = shifted[2];
           } else {
-            pr = color[0];
-            pg = color[1];
-            pb = color[2];
+            pr = cr;
+            pg = cg;
+            pb = cb;
           }
 
-          const i = (r * this._cols + c) * 4;
-          // Additive blend into overlay
-          buf[i] = Math.min(255, buf[i] + Math.round(pr * intensity));
-          buf[i + 1] = Math.min(255, buf[i + 1] + Math.round(pg * intensity));
-          buf[i + 2] = Math.min(255, buf[i + 2] + Math.round(pb * intensity));
-          buf[i + 3] = Math.min(255, buf[i + 3] + Math.round(255 * intensity));
+          const idx = (rowOff + c) << 2; // * 4
+          // Additive blend — Uint8ClampedArray auto-clamps to [0, 255]
+          buf[idx] = buf[idx] + pr * intensity;
+          buf[idx + 1] = buf[idx + 1] + pg * intensity;
+          buf[idx + 2] = buf[idx + 2] + pb * intensity;
+          buf[idx + 3] = buf[idx + 3] + 255 * intensity;
         }
       }
 
