@@ -10,6 +10,52 @@ import { AnimationState } from "../lib/animation";
 import { EffectPreset } from "../lib/effects";
 import InfoTooltip from "./InfoTooltip";
 
+/** Small canvas that mirrors the gesture video feed at ~15 fps */
+function GestureCameraPreview({
+    videoRef,
+    visible,
+    ready,
+}: {
+    videoRef: React.RefObject<HTMLVideoElement | null>;
+    visible: boolean;
+    ready: boolean;
+}) {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+
+    useEffect(() => {
+        if (!visible || !ready) return;
+        let rafId = 0;
+        const draw = () => {
+            const video = videoRef.current;
+            const canvas = canvasRef.current;
+            if (video && canvas && video.readyState >= 2) {
+                const ctx = canvas.getContext("2d");
+                if (ctx) {
+                    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                        canvas.width = video.videoWidth || 320;
+                        canvas.height = video.videoHeight || 240;
+                    }
+                    ctx.save();
+                    ctx.translate(canvas.width, 0);
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    ctx.restore();
+                }
+            }
+            rafId = requestAnimationFrame(draw);
+        };
+        rafId = requestAnimationFrame(draw);
+        return () => cancelAnimationFrame(rafId);
+    }, [videoRef, visible, ready]);
+
+    return (
+        <canvas
+            ref={canvasRef}
+            className="block w-full h-full object-cover"
+        />
+    );
+}
+
 interface ControlPanelProps {
     activeTool: ToolKind;
     activeColor: RGB;
@@ -363,18 +409,16 @@ export default function ControlPanel({
                                 )}
                             </div>
 
-                            {/* Camera preview — video element lives here (always in DOM) */}
+                            {/* Camera preview -- canvas mirrors the video feed which lives in LEDBoard */}
                             <div className={`relative rounded-lg overflow-hidden border transition-all duration-200 ${gestureShowCamera ? "h-28" : "h-0 opacity-0 pointer-events-none"
                                 } ${gestureLoadState === "ready"
                                     ? gesturePinching ? "border-yellow-500/50" : "border-purple-500/30"
                                     : "border-white/10"
                                 }`}>
-                                <video
-                                    ref={gestureVideoRef}
-                                    className="block w-full h-full object-cover"
-                                    style={{ transform: "scaleX(-1)" }}
-                                    muted
-                                    playsInline
+                                <GestureCameraPreview
+                                    videoRef={gestureVideoRef}
+                                    visible={gestureShowCamera}
+                                    ready={gestureLoadState === "ready"}
                                 />
                                 {gestureLoadState !== "ready" && gestureShowCamera && (
                                     <div className="absolute inset-0 bg-black/75 flex items-center justify-center text-[9px] text-white/50 font-mono px-2 text-center leading-tight">

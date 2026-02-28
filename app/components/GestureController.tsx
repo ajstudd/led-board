@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-// â”€â”€ WASM/data assets served from jsDelivr (safe â€” binary, not JS) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- WASM/data assets served from jsDelivr (safe - binary, not JS) ------------
 const WASM_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/";
 
 // Hysteresis band so pinch doesn't flicker at the threshold boundary
@@ -10,11 +10,11 @@ const PINCH_HYSTERESIS = 0.015;
 
 export type GestureLoadState = "loading" | "ready" | "error";
 
-// â”€â”€ Props â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Props ---------------------------------------------------------------------
 export interface GestureControllerProps {
-    /** Video element that MediaPipe Camera reads from â€” rendered by the parent */
+    /** Video element that MediaPipe Camera reads from - rendered by the parent */
     videoRef: React.RefObject<HTMLVideoElement | null>;
-    /** Normalised pinch threshold (0.03 â€“ 0.15). */
+    /** Normalised pinch threshold (0.03 - 0.15). */
     pinchThreshold: number;
     /**
      * Fired every frame: screen-pixel position of the gesture cursor.
@@ -30,14 +30,14 @@ export interface GestureControllerProps {
     onPinchRelease: () => void;
     /**
      * Fired when a two-finger scroll gesture is detected.
-     * delta > 0 â†’ scroll down, delta < 0 â†’ scroll up (in screen px).
+     * delta > 0 -> scroll down, delta < 0 -> scroll up (in screen px).
      */
     onScroll: (delta: number) => void;
-    /** Called whenever load/pinch state changes â€” drives the UI in the sidebar. */
+    /** Called whenever load/pinch state changes - drives the UI in the sidebar. */
     onStatusChange: (state: GestureLoadState, msg: string, pinching: boolean) => void;
 }
 
-// â”€â”€ Component â€” renders nothing; all state lives in the sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// -- Component - renders nothing; all state lives in the sidebar ---------------
 export default function GestureController({
     videoRef,
     pinchThreshold,
@@ -62,13 +62,13 @@ export default function GestureController({
     useEffect(() => { scrollRef.current = onScroll; }, [onScroll]);
     useEffect(() => { statusRef.current = onStatusChange; }, [onStatusChange]);
 
-    // Per-frame gesture state — all refs, zero React re-renders from here
+    // Per-frame gesture state - all refs, zero React re-renders from here
     const wasPinchingRef = useRef(false);
     const lastPinchXRef = useRef(-1);
     const lastPinchYRef = useRef(-1);
     const lastScrollYRef = useRef<number | null>(null);
 
-    // ── EMA smoothing for cursor position (reduces jitter) ──
+    // -- EMA smoothing for cursor position (reduces jitter) --
     // α close to 0 = very smooth but laggy; close to 1 = raw/responsive.
     const SMOOTH_ALPHA = 0.35;
     const smoothXRef = useRef<number | null>(null);
@@ -89,7 +89,7 @@ export default function GestureController({
 
         const run = async () => {
             try {
-                statusRef.current("loading", "Loading MediaPipeâ€¦", false);
+                statusRef.current("loading", "Loading MediaPipe...", false);
 
                 const [{ Hands }, { Camera }] = await Promise.all([
                     import("@mediapipe/hands"),
@@ -97,7 +97,7 @@ export default function GestureController({
                 ]);
                 if (!active) return;
 
-                statusRef.current("loading", "Starting cameraâ€¦", false);
+                statusRef.current("loading", "Starting camera...", false);
 
                 handsInst = new Hands({
                     locateFile: (f: string) => `${WASM_BASE}${f}`,
@@ -113,7 +113,7 @@ export default function GestureController({
                 handsInst.onResults((results: any) => {
                     if (!active) return;
 
-                    // â”€â”€ No hand visible â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                    // -- No hand visible --------------------------------------
                     if (!results.multiHandLandmarks?.length) {
                         if (wasPinchingRef.current) {
                             wasPinchingRef.current = false;
@@ -136,7 +136,7 @@ export default function GestureController({
                     const W = window.innerWidth;
                     const H = window.innerHeight;
 
-                    // â”€â”€ Two-finger scroll (â˜ï¸ðŸ–• index + middle up, ring + pinky curled) â”€â”€
+                    // -- Two-finger scroll (index + middle up, ring + pinky curled) --
                     const indexUp = indexTip.y < lm[5].y;
                     const middleUp = middleTip.y < lm[9].y;
                     const ringDown = lm[16].y > lm[13].y;
@@ -162,20 +162,20 @@ export default function GestureController({
                         smoothXRef.current = sx;
                         smoothYRef.current = sy;
                         moveRef.current(sx, sy);
-                        statusRef.current("ready", "Scrollingâ€¦", false);
+                        statusRef.current("ready", "Scrolling...", false);
                         return;
                     } else {
                         lastScrollYRef.current = null;
                     }
 
-                    // â”€â”€ Pinch detection with hysteresis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                    // -- Pinch detection with hysteresis ---------------------
                     const dist = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
                     const thresh = threshRef.current;
                     const isPinch = wasPinchingRef.current
                         ? dist < thresh + PINCH_HYSTERESIS
                         : dist < thresh - PINCH_HYSTERESIS;
 
-                    // â”€â”€ Screen-pixel cursor position â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                    // -- Screen-pixel cursor position -------------------------
                     const rawX = isPinch ? 1 - (indexTip.x + thumbTip.x) / 2 : 1 - indexTip.x;
                     const rawY = isPinch ? (indexTip.y + thumbTip.y) / 2 : indexTip.y;
                     // Apply EMA smoothing to reduce frame-to-frame jitter
@@ -186,7 +186,7 @@ export default function GestureController({
 
                     moveRef.current(screenX, screenY);
 
-                    // â”€â”€ Mouse-like event model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                    // -- Mouse-like event model -------------------------------
                     const moved = Math.abs(screenX - lastPinchXRef.current) > 1
                         || Math.abs(screenY - lastPinchYRef.current) > 1;
 
@@ -201,7 +201,7 @@ export default function GestureController({
                     wasPinchingRef.current = isPinch;
                     lastPinchXRef.current = screenX;
                     lastPinchYRef.current = screenY;
-                    statusRef.current("ready", isPinch ? "Pinchingâ€¦" : "Gesture active", isPinch);
+                    statusRef.current("ready", isPinch ? "Pinching..." : "Gesture active", isPinch);
                 });
 
                 const video = videoRef.current;
@@ -236,7 +236,7 @@ export default function GestureController({
             try { cameraInst?.stop(); } catch { /* ignore */ }
             try { handsInst?.close(); } catch { /* ignore */ }
         };
-        // videoRef is a stable useRef â€” only run once on mount
+        // videoRef is a stable useRef - only run once on mount
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 

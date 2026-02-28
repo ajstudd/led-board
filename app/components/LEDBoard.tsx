@@ -979,8 +979,8 @@ export default function LEDBoard() {
                             width: cs + 2,
                             height: cs + 2,
                             border: `2px solid ${gestureDrawing
-                                    ? "rgba(250,204,21,0.95)"
-                                    : "rgba(192,132,252,0.8)"
+                                ? "rgba(250,204,21,0.95)"
+                                : "rgba(192,132,252,0.8)"
                                 }`,
                             boxShadow: gestureDrawing
                                 ? "0 0 10px rgba(250,204,21,0.5), 0 0 4px rgba(250,204,21,0.8)"
@@ -992,15 +992,24 @@ export default function LEDBoard() {
 
             {/* Gesture controller (camera + MediaPipe, renders null) */}
             {gestureEnabled && (
-                <GestureController
-                    videoRef={gestureVideoRef}
-                    pinchThreshold={gesturePinchThreshold}
-                    onCursorMove={handleGestureCursorMove}
-                    onPinchAt={handleGesturePinchAt}
-                    onPinchRelease={handleGesturePinchRelease}
-                    onScroll={handleGestureScroll}
-                    onStatusChange={handleGestureStatus}
-                />
+                <>
+                    {/* Hidden video element -- always in DOM so the camera feed persists even when sidebar is collapsed */}
+                    <video
+                        ref={gestureVideoRef}
+                        className="fixed top-0 left-0 w-0 h-0 opacity-0 pointer-events-none"
+                        muted
+                        playsInline
+                    />
+                    <GestureController
+                        videoRef={gestureVideoRef}
+                        pinchThreshold={gesturePinchThreshold}
+                        onCursorMove={handleGestureCursorMove}
+                        onPinchAt={handleGesturePinchAt}
+                        onPinchRelease={handleGesturePinchRelease}
+                        onScroll={handleGestureScroll}
+                        onStatusChange={handleGestureStatus}
+                    />
+                </>
             )}
 
             {/* Control Panel */}
