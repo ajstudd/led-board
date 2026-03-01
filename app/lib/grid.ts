@@ -130,6 +130,38 @@ export class GridManager {
     this._data = newData;
   }
 
+  /** Change the cell size and resize the grid, preserving existing data */
+  resizeCellSize(
+    viewportWidth: number,
+    viewportHeight: number,
+    newCellSize: number,
+  ): void {
+    this._cellSize = newCellSize;
+    const newCols = Math.floor(viewportWidth / newCellSize);
+    const newRows = Math.floor(viewportHeight / newCellSize);
+
+    if (newCols === this._cols && newRows === this._rows) return;
+
+    const newData = new Uint8ClampedArray(newCols * newRows * 3);
+
+    const copyRows = Math.min(this._rows, newRows);
+    const copyCols = Math.min(this._cols, newCols);
+
+    for (let r = 0; r < copyRows; r++) {
+      for (let c = 0; c < copyCols; c++) {
+        const oldI = (r * this._cols + c) * 3;
+        const newI = (r * newCols + c) * 3;
+        newData[newI] = this._data[oldI];
+        newData[newI + 1] = this._data[oldI + 1];
+        newData[newI + 2] = this._data[oldI + 2];
+      }
+    }
+
+    this._cols = newCols;
+    this._rows = newRows;
+    this._data = newData;
+  }
+
   /** Replace the internal data buffer (e.g. when loading from JSON) */
   loadData(data: Uint8ClampedArray): void {
     if (data.length === this._data.length) {
