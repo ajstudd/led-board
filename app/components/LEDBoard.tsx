@@ -773,6 +773,33 @@ export default function LEDBoard() {
         document.querySelector("[data-gesture-scroll]")?.scrollBy({ top: delta });
     }, []);
 
+    // Full open-hand swipe — stop everything and clear the board
+    const handleGestureSwipeClear = useCallback(() => {
+        // Stop animation if running
+        if (animRef.current && animRef.current.state !== "stopped") {
+            animRef.current.stop();
+            setMarqueeBuffer(null);
+            if (snapshotRef.current) {
+                snapshotRef.current = null;
+            }
+            setCurrentAnim(null);
+            setAnimFrame(0);
+            try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
+            strokeRecorder.resume();
+        }
+        // Clear effects
+        effectsRef.current?.clearEffects();
+        // Clear the board
+        strokeRecorder.clear();
+        contentLayersRef.current = [];
+        gridRef.current?.clear();
+        canvasHandleRef.current?.redraw();
+        // Clear undo stack
+        undoStackRef.current = [];
+        setCanUndo(false);
+        saveGridToStorage();
+    }, [saveGridToStorage]);
+
     // Status change from GestureController
     const handleGestureStatus = useCallback(
         (state: GestureLoadState, msg: string, pinching: boolean) => {
@@ -1160,6 +1187,7 @@ export default function LEDBoard() {
                         onPinchAt={handleGesturePinchAt}
                         onPinchRelease={handleGesturePinchRelease}
                         onScroll={handleGestureScroll}
+                        onSlapClear={handleGestureSwipeClear}
                         onStatusChange={handleGestureStatus}
                     />
                 </>

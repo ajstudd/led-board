@@ -508,6 +508,7 @@ export default function ControlPanel({
                                     <li>☝ Point finger → moves cursor</li>
                                     <li>🤌 Pinch → click / draw (hold = drag)</li>
                                     <li>✌ Two fingers up/down → scroll panel</li>
+                                    <li>🫲 Slap (thumb out, 4 fingers together) → clear board</li>
                                     <li className="text-white/40 pt-0.5">Enable Pixel Effects for glow on draw</li>
                                 </ul>
                             </InfoTooltip>
