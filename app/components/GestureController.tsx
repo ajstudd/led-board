@@ -87,6 +87,20 @@ export default function GestureController({
     /** Cooldown after firing (≈2s at 30fps). */
     const SLAP_COOLDOWN = 60;
 
+    // -- Open-hand swipe detection state --
+    /** Previous wrist X position (normalised 0-1). */
+    const swipePrevXRef = useRef<number | null>(null);
+    /** Accumulated horizontal distance while swiping. */
+    const swipeAccumRef = useRef(0);
+    /** Cooldown frames after swipe fires. */
+    const swipeCooldownRef = useRef(0);
+    /** Min per-frame velocity (normalised) to count as movement. */
+    const SWIPE_MIN_VEL = 0.04;
+    /** Accumulated distance threshold to fire. */
+    const SWIPE_DIST_THRESH = 0.25;
+    /** Cooldown after firing (≈2s at 30fps). */
+    const SWIPE_COOLDOWN = 60;
+
     // -- EMA smoothing for cursor position (reduces jitter) --
     // α close to 0 = very smooth but laggy; close to 1 = raw/responsive.
     const SMOOTH_ALPHA = 0.35;
@@ -215,6 +229,49 @@ export default function GestureController({
                         return;
                     } else if (!isSlap) {
                         slapFramesRef.current = 0;
+                    }
+
+                    // -- Open-hand swipe detection ----------------------------
+                    // 5 fingers extended (including thumb), slightly apart, hand moving L/R
+                    const thumbExtended = thumbTip.y < lm[2].y;
+                    const fiveExtended = fourStraight && thumbExtended;
+                    // Fingers slightly apart: adjacent tips spaced > 0.03 apart
+                    const slightSpread =
+                        fingerSpreadX > 0.03 || fingerSpreadY > 0.03;
+                    const isOpenHand = fiveExtended && slightSpread;
+
+                    if (swipeCooldownRef.current > 0) {
+                        swipeCooldownRef.current--;
+                    }
+
+                    if (isOpenHand && swipeCooldownRef.current === 0) {
+                        const wristX = lm[0].x;
+                        if (swipePrevXRef.current !== null) {
+                            const dx = Math.abs(wristX - swipePrevXRef.current);
+                            if (dx >= SWIPE_MIN_VEL) {
+                                swipeAccumRef.current += dx;
+                            } else {
+                                // Slow / stationary — decay
+                                swipeAccumRef.current *= 0.6;
+                            }
+                            if (swipeAccumRef.current >= SWIPE_DIST_THRESH) {
+                                // SWIPE DETECTED — fire clear
+                                slapClearRef.current();
+                                swipeAccumRef.current = 0;
+                                swipeCooldownRef.current = SWIPE_COOLDOWN;
+                                swipePrevXRef.current = null;
+                                if (wasPinchingRef.current) {
+                                    wasPinchingRef.current = false;
+                                    pinchReleaseRef.current();
+                                }
+                                statusRef.current("ready", "👋 Swipe! Board cleared", false);
+                                return;
+                            }
+                        }
+                        swipePrevXRef.current = wristX;
+                    } else {
+                        swipePrevXRef.current = null;
+                        swipeAccumRef.current = 0;
                     }
 
                     // -- Two-finger scroll (index + middle up, ring + pinky curled) --
