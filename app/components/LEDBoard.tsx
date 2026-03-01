@@ -32,18 +32,7 @@ export default function LEDBoard() {
     const effectsRef = useRef<EffectsEngine | null>(null);
     const effectsOverlayRef = useRef<EffectsOverlay | null>(null);
 
-    const [settings, setSettings] = useState<BoardSettings>(() => {
-        // Load saved cell size from localStorage on initial mount
-        let cellSize = DEFAULT_SETTINGS.cellSize;
-        try {
-            const saved = localStorage.getItem(STORAGE_KEY_CELL_SIZE);
-            if (saved) {
-                const v = parseInt(saved, 10);
-                if (!isNaN(v) && v >= 2 && v <= 40) cellSize = v;
-            }
-        } catch { /* ignore */ }
-        return { ...DEFAULT_SETTINGS, cellSize };
-    });
+    const [settings, setSettings] = useState<BoardSettings>(DEFAULT_SETTINGS);
     const [activeTool, setActiveTool] = useState<ToolKind>("draw");
     const [activeColor, setActiveColor] = useState<RGB>([0, 255, 0]);
     const [cellInfo, setCellInfo] = useState<{
@@ -101,9 +90,22 @@ export default function LEDBoard() {
 
     // ── Initialise grid on mount ──────────────────────────
     useEffect(() => {
+        // Restore saved cell size from localStorage (client-only to avoid hydration mismatch)
+        let cellSize = DEFAULT_SETTINGS.cellSize;
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY_CELL_SIZE);
+            if (saved) {
+                const v = parseInt(saved, 10);
+                if (!isNaN(v) && v >= 2 && v <= 40) cellSize = v;
+            }
+        } catch { /* ignore */ }
+        if (cellSize !== DEFAULT_SETTINGS.cellSize) {
+            setSettings((prev) => ({ ...prev, cellSize }));
+        }
+
         const w = window.innerWidth;
         const h = window.innerHeight;
-        gridRef.current = new GridManager(w, h, settings.cellSize);
+        gridRef.current = new GridManager(w, h, cellSize);
 
         // Load saved grid data from localStorage
         try {
