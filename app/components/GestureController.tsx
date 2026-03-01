@@ -33,6 +33,12 @@ export interface GestureControllerProps {
      * delta > 0 -> scroll down, delta < 0 -> scroll up (in screen px).
      */
     onScroll: (delta: number) => void;
+    /**
+     * Fired when a "slap" gesture is detected (thumb spread away,
+     * other 4 fingers straight and close together). Stops everything
+     * and clears the board.
+     */
+    onSlapClear: () => void;
     /** Called whenever load/pinch state changes - drives the UI in the sidebar. */
     onStatusChange: (state: GestureLoadState, msg: string, pinching: boolean) => void;
 }
@@ -45,6 +51,7 @@ export default function GestureController({
     onPinchAt,
     onPinchRelease,
     onScroll,
+    onSlapClear,
     onStatusChange,
 }: GestureControllerProps) {
     // All callback props in refs so the MediaPipe closure never goes stale
@@ -60,6 +67,8 @@ export default function GestureController({
     useEffect(() => { pinchAtRef.current = onPinchAt; }, [onPinchAt]);
     useEffect(() => { pinchReleaseRef.current = onPinchRelease; }, [onPinchRelease]);
     useEffect(() => { scrollRef.current = onScroll; }, [onScroll]);
+    const slapClearRef = useRef(onSlapClear);
+    useEffect(() => { slapClearRef.current = onSlapClear; }, [onSlapClear]);
     useEffect(() => { statusRef.current = onStatusChange; }, [onStatusChange]);
 
     // Per-frame gesture state - all refs, zero React re-renders from here
@@ -67,6 +76,30 @@ export default function GestureController({
     const lastPinchXRef = useRef(-1);
     const lastPinchYRef = useRef(-1);
     const lastScrollYRef = useRef<number | null>(null);
+
+    // -- Slap gesture detection state --
+    /** Consecutive frames slap pose has been held. */
+    const slapFramesRef = useRef(0);
+    /** Cooldown frames after slap fires (prevents re-trigger). */
+    const slapCooldownRef = useRef(0);
+    /** Number of consecutive slap frames required to trigger (≈0.4s at 30fps). */
+    const SLAP_HOLD_FRAMES = 12;
+    /** Cooldown after firing (≈2s at 30fps). */
+    const SLAP_COOLDOWN = 60;
+
+    // -- Open-hand swipe detection state --
+    /** Previous wrist X position (normalised 0-1). */
+    const swipePrevXRef = useRef<number | null>(null);
+    /** Accumulated horizontal distance while swiping. */
+    const swipeAccumRef = useRef(0);
+    /** Cooldown frames after swipe fires. */
+    const swipeCooldownRef = useRef(0);
+    /** Min per-frame velocity (normalised) to count as movement. */
+    const SWIPE_MIN_VEL = 0.04;
+    /** Accumulated distance threshold to fire. */
+    const SWIPE_DIST_THRESH = 0.25;
+    /** Cooldown after firing (≈2s at 30fps). */
+    const SWIPE_COOLDOWN = 60;
 
     // -- EMA smoothing for cursor position (reduces jitter) --
     // α close to 0 = very smooth but laggy; close to 1 = raw/responsive.
@@ -135,6 +168,111 @@ export default function GestureController({
                     const middleTip = lm[12];  // middle fingertip
                     const W = window.innerWidth;
                     const H = window.innerHeight;
+
+                    // -- Slap gesture detection --------------------------------
+                    // Slap = 4 fingers straight & close together, thumb spread away
+                    // 1. Four fingers extended: each fingertip above its PIP joint
+                    const indexStraight = lm[8].y < lm[6].y;
+                    const middleStraight = lm[12].y < lm[10].y;
+                    const ringStraight = lm[16].y < lm[14].y;
+                    const pinkyStraight = lm[20].y < lm[18].y;
+                    const fourStraight = indexStraight && middleStraight && ringStraight && pinkyStraight;
+
+                    // 2. Four fingertips close together (small spread)
+                    const fingerSpreadX = Math.max(
+                        Math.abs(lm[8].x - lm[12].x),
+                        Math.abs(lm[12].x - lm[16].x),
+                        Math.abs(lm[16].x - lm[20].x),
+                    );
+                    const fingerSpreadY = Math.max(
+                        Math.abs(lm[8].y - lm[12].y),
+                        Math.abs(lm[12].y - lm[16].y),
+                        Math.abs(lm[16].y - lm[20].y),
+                    );
+                    const fingersTight = fingerSpreadX < 0.09 && fingerSpreadY < 0.09;
+
+                    // 3. Thumb is spread away from the index finger
+                    const thumbToIndex = Math.hypot(
+                        lm[4].x - lm[8].x,
+                        lm[4].y - lm[8].y,
+                    );
+                    // Also check thumb is away from palm center (lm[9] = middle MCP)
+                    const thumbToPalm = Math.hypot(
+                        lm[4].x - lm[9].x,
+                        lm[4].y - lm[9].y,
+                    );
+                    const thumbSpread = thumbToIndex > 0.12 && thumbToPalm > 0.10;
+
+                    const isSlap = fourStraight && fingersTight && thumbSpread;
+
+                    if (slapCooldownRef.current > 0) {
+                        slapCooldownRef.current--;
+                    }
+
+                    if (isSlap && slapCooldownRef.current === 0) {
+                        slapFramesRef.current++;
+                        if (slapFramesRef.current >= SLAP_HOLD_FRAMES) {
+                            // SLAP DETECTED — fire clear callback
+                            slapClearRef.current();
+                            slapFramesRef.current = 0;
+                            slapCooldownRef.current = SLAP_COOLDOWN;
+                            if (wasPinchingRef.current) {
+                                wasPinchingRef.current = false;
+                                pinchReleaseRef.current();
+                            }
+                            statusRef.current("ready", "🫲 Slap! Board cleared", false);
+                            return;
+                        }
+                        // Show countdown while holding slap pose
+                        const remaining = SLAP_HOLD_FRAMES - slapFramesRef.current;
+                        statusRef.current("ready", `🫲 Hold slap... ${remaining}`, false);
+                        return;
+                    } else if (!isSlap) {
+                        slapFramesRef.current = 0;
+                    }
+
+                    // -- Open-hand swipe detection ----------------------------
+                    // 5 fingers extended (including thumb), slightly apart, hand moving L/R
+                    const thumbExtended = thumbTip.y < lm[2].y;
+                    const fiveExtended = fourStraight && thumbExtended;
+                    // Fingers slightly apart: adjacent tips spaced > 0.03 apart
+                    const slightSpread =
+                        fingerSpreadX > 0.03 || fingerSpreadY > 0.03;
+                    const isOpenHand = fiveExtended && slightSpread;
+
+                    if (swipeCooldownRef.current > 0) {
+                        swipeCooldownRef.current--;
+                    }
+
+                    if (isOpenHand && swipeCooldownRef.current === 0) {
+                        const wristX = lm[0].x;
+                        if (swipePrevXRef.current !== null) {
+                            const dx = Math.abs(wristX - swipePrevXRef.current);
+                            if (dx >= SWIPE_MIN_VEL) {
+                                swipeAccumRef.current += dx;
+                            } else {
+                                // Slow / stationary — decay
+                                swipeAccumRef.current *= 0.6;
+                            }
+                            if (swipeAccumRef.current >= SWIPE_DIST_THRESH) {
+                                // SWIPE DETECTED — fire clear
+                                slapClearRef.current();
+                                swipeAccumRef.current = 0;
+                                swipeCooldownRef.current = SWIPE_COOLDOWN;
+                                swipePrevXRef.current = null;
+                                if (wasPinchingRef.current) {
+                                    wasPinchingRef.current = false;
+                                    pinchReleaseRef.current();
+                                }
+                                statusRef.current("ready", "👋 Swipe! Board cleared", false);
+                                return;
+                            }
+                        }
+                        swipePrevXRef.current = wristX;
+                    } else {
+                        swipePrevXRef.current = null;
+                        swipeAccumRef.current = 0;
+                    }
 
                     // -- Two-finger scroll (index + middle up, ring + pinky curled) --
                     const indexUp = indexTip.y < lm[5].y;

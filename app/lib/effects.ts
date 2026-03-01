@@ -182,6 +182,129 @@ export const EFFECT_PRESETS: EffectPreset[] = [
     },
     hueShift: (_dist, age) => age * 12,
   },
+
+  // 7. Laser — DJ-concert-style laser beams shooting in random directions
+  {
+    name: "Laser",
+    maxAge: 35,
+    maxRadius: 28,
+    intensity: (dx, dy, dist, age, maxAge, maxRadius) => {
+      if (dist < 0.5) return 1 - age / maxAge;
+      const progress = age / maxAge;
+      // Beams extend rapidly, then fade
+      const beamLength = progress * maxRadius;
+      if (dist > beamLength) return 0;
+
+      const angle = Math.atan2(dy, dx);
+
+      // 5 laser beams at pseudo-random but deterministic angles
+      // seeded per-effect via maxAge (stable across frames for one trigger)
+      const numBeams = 5;
+      let maxIntensity = 0;
+      for (let i = 0; i < numBeams; i++) {
+        // Spread beams around the circle with a golden-angle-like offset
+        const beamAngle = -Math.PI + ((i * 2.399) % (2 * Math.PI)); // golden angle ≈ 137.5°
+        let angleDiff = Math.abs(angle - beamAngle);
+        if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+
+        // Beam width: very narrow (laser-thin), tapers slightly with distance
+        const beamWidth = 0.12 + dist * 0.008;
+        if (angleDiff > beamWidth) continue;
+
+        // Core brightness — bright center, sharp falloff
+        const coreFade = 1 - angleDiff / beamWidth;
+        const core = Math.pow(coreFade, 3); // sharp laser edge
+
+        // Distance-based sweep: beam "shoots" outward
+        const tipDist = Math.abs(dist - beamLength);
+        const tipGlow = tipDist < 2 ? 1 - tipDist / 2 : 0;
+        const bodyGlow = 0.3 + 0.7 * (1 - dist / beamLength);
+
+        // Flicker — subtle high-frequency shimmer
+        const flicker = 0.8 + 0.2 * Math.sin(dist * 3.5 - age * 2 + i * 1.7);
+
+        const fade = 1 - Math.pow(progress, 0.5);
+        const intensity = core * (bodyGlow + tipGlow * 0.7) * fade * flicker;
+        maxIntensity = Math.max(maxIntensity, intensity);
+      }
+      return maxIntensity;
+    },
+    // Vivid hue cycling — each beam picks up a different colour shift
+    hueShift: (dist, age) => dist * 20 + age * 10,
+  },
+
+  // 8. Bubble — expanding bubbles that float outward in random directions
+  {
+    name: "Bubble",
+    maxAge: 50,
+    maxRadius: 20,
+    intensity: (dx, dy, dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const fade = 1 - Math.pow(progress, 0.4);
+
+      // Generate 6 bubbles drifting outward in different directions
+      const numBubbles = 6;
+      let maxIntensity = 0;
+
+      for (let i = 0; i < numBubbles; i++) {
+        // Each bubble has a deterministic direction (golden angle spread)
+        const bAngle = i * 2.399 + 0.5;
+        const bCos = Math.cos(bAngle);
+        const bSin = Math.sin(bAngle);
+
+        // Bubble drifts outward over time (with slight deceleration)
+        const driftSpeed = 0.6 + (i % 3) * 0.15;
+        const drift = age * driftSpeed * (1 - progress * 0.3);
+        const bx = bCos * drift;
+        const by = bSin * drift;
+
+        // Distance from this pixel to the bubble center
+        const bdx = dx - bx;
+        const bdy = dy - by;
+        const bDist = Math.sqrt(bdx * bdx + bdy * bdy);
+
+        // Bubble radius grows then shrinks (pops)
+        const growPhase = Math.min(progress * 3, 1); // quick inflate
+        const popPhase = progress > 0.75 ? (progress - 0.75) / 0.25 : 0;
+        const bubbleRadius = (1.2 + i * 0.2) * growPhase * (1 - popPhase * 0.6);
+        if (bubbleRadius < 0.3) continue;
+
+        // Hollow sphere look — bright ring, dim inside
+        const ringWidth = 0.45 + bubbleRadius * 0.15;
+        const ringDist = Math.abs(bDist - bubbleRadius);
+        if (bDist > bubbleRadius + ringWidth) continue;
+
+        let intensity: number;
+        if (ringDist < ringWidth) {
+          // On the ring edge — bright
+          intensity = (1 - ringDist / ringWidth) * 0.9;
+        } else {
+          // Inside the bubble — subtle inner glow
+          intensity = (1 - bDist / bubbleRadius) * 0.25;
+        }
+
+        // Specular highlight — small bright spot on upper-left of bubble
+        const specX = bdx + bubbleRadius * 0.35;
+        const specY = bdy + bubbleRadius * 0.35;
+        const specDist = Math.sqrt(specX * specX + specY * specY);
+        if (specDist < bubbleRadius * 0.35) {
+          intensity += (1 - specDist / (bubbleRadius * 0.35)) * 0.6;
+        }
+
+        // Wobble — subtle oscillation for organic feel
+        const wobble =
+          0.85 + 0.15 * Math.sin(age * 0.5 + i * 2.1 + bDist * 1.2);
+
+        maxIntensity = Math.max(
+          maxIntensity,
+          Math.min(1, intensity * fade * wobble * (1 - popPhase * 0.5)),
+        );
+      }
+      return maxIntensity;
+    },
+    // Iridescent hue shift — soap-bubble rainbow sheen
+    hueShift: (dist, age) => dist * 25 + age * 6,
+  },
 ];
 
 // ── Active Effect Instance ────────────────────────────

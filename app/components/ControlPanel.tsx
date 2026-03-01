@@ -70,6 +70,7 @@ interface ControlPanelProps {
     canUndo: boolean;
     onApplyPattern: (fn: (cols: number, rows: number, data: Uint8ClampedArray) => void) => void;
     onRenderText: (text: string, color: RGB, scale?: number, wrap?: boolean) => void;
+    onCellSizeChange: (size: number) => void;
     // Animation
     animState: AnimationState;
     currentAnim: AnimationConfig | null;
@@ -160,6 +161,7 @@ export default function ControlPanel({
     canUndo,
     onApplyPattern,
     onRenderText,
+    onCellSizeChange,
     animState,
     currentAnim,
     animFps,
@@ -282,6 +284,47 @@ export default function ControlPanel({
                 <div className="text-white/60 text-[10px] sm:text-xs">
                     {gridDims.cols}×{gridDims.rows} ({(gridDims.cols * gridDims.rows).toLocaleString()}{" "}
                     cells) · {settings.cellSize}px
+                </div>
+
+                {/* Cell Size Slider */}
+                <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-widest text-white/40">Cell Size</span>
+                        <span className="text-[10px] text-white/60 tabular-nums">{settings.cellSize}px</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => onCellSizeChange(settings.cellSize - 1)}
+                            disabled={settings.cellSize <= 2}
+                            className={`rounded px-1.5 py-0.5 text-[10px] transition min-h-6 sm:min-h-0 ${settings.cellSize <= 2 ? "opacity-30 cursor-not-allowed bg-white/5" : "bg-white/10 hover:bg-white/20 text-white/70"
+                                }`}
+                            title="Decrease cell size"
+                        >
+                            −
+                        </button>
+                        <input
+                            type="range"
+                            min={2}
+                            max={40}
+                            step={1}
+                            value={settings.cellSize}
+                            onChange={(e) => onCellSizeChange(parseInt(e.target.value, 10))}
+                            className="flex-1 accent-green-400 cursor-pointer h-1"
+                        />
+                        <button
+                            onClick={() => onCellSizeChange(settings.cellSize + 1)}
+                            disabled={settings.cellSize >= 40}
+                            className={`rounded px-1.5 py-0.5 text-[10px] transition min-h-6 sm:min-h-0 ${settings.cellSize >= 40 ? "opacity-30 cursor-not-allowed bg-white/5" : "bg-white/10 hover:bg-white/20 text-white/70"
+                                }`}
+                            title="Increase cell size"
+                        >
+                            +
+                        </button>
+                    </div>
+                    <div className="flex items-center justify-between text-[9px] text-white/30">
+                        <span>2px (more cells)</span>
+                        <span>40px (larger)</span>
+                    </div>
                 </div>
 
                 {/* Separator */}
@@ -465,6 +508,8 @@ export default function ControlPanel({
                                     <li>☝ Point finger → moves cursor</li>
                                     <li>🤌 Pinch → click / draw (hold = drag)</li>
                                     <li>✌ Two fingers up/down → scroll panel</li>
+                                    <li>🫲 Slap (thumb out, 4 fingers together) → clear board</li>
+                                    <li>👋 Open-hand swipe left/right → clear board</li>
                                     <li className="text-white/40 pt-0.5">Enable Pixel Effects for glow on draw</li>
                                 </ul>
                             </InfoTooltip>

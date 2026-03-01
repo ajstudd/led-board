@@ -22,6 +22,7 @@ const STORAGE_KEY_EFFECTS = "tenix-effects";
 const STORAGE_KEY_EFFECT_PRESET = "tenix-effectPreset";
 const STORAGE_KEY_EFFECT_DISTANCE = "tenix-effectDistance";
 const STORAGE_KEY_EFFECT_SPEED = "tenix-effectSpeed";
+const STORAGE_KEY_CELL_SIZE = "tenix-cellSize";
 const MAX_UNDO = 50;
 
 export default function LEDBoard() {
@@ -89,9 +90,22 @@ export default function LEDBoard() {
 
     // ── Initialise grid on mount ──────────────────────────
     useEffect(() => {
+        // Restore saved cell size from localStorage (client-only to avoid hydration mismatch)
+        let cellSize = DEFAULT_SETTINGS.cellSize;
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY_CELL_SIZE);
+            if (saved) {
+                const v = parseInt(saved, 10);
+                if (!isNaN(v) && v >= 2 && v <= 40) cellSize = v;
+            }
+        } catch { /* ignore */ }
+        if (cellSize !== DEFAULT_SETTINGS.cellSize) {
+            setSettings((prev) => ({ ...prev, cellSize }));
+        }
+
         const w = window.innerWidth;
         const h = window.innerHeight;
-        gridRef.current = new GridManager(w, h, settings.cellSize);
+        gridRef.current = new GridManager(w, h, cellSize);
 
         // Load saved grid data from localStorage
         try {
@@ -119,7 +133,8 @@ export default function LEDBoard() {
 
         // Redraw after loading (canvas effect may have run before data was loaded)
         requestAnimationFrame(() => canvasHandleRef.current?.redraw());
-    }, [settings.cellSize]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // ── Initialise animation manager ─────────────────────
     useEffect(() => {
@@ -391,6 +406,125 @@ export default function LEDBoard() {
         [replayLayers],
     );
 
+    // ── Handle cell size change ───────────────────────────
+    const handleCellSizeChange = useCallback(
+        (newSize: number) => {
+            const grid = gridRef.current;
+            if (!grid) return;
+
+            const clamped = Math.max(2, Math.min(40, Math.round(newSize)));
+            if (clamped === grid.cellSize) return;
+
+            const oldCols = grid.cols;
+            const oldRows = grid.rows;
+
+            // Update settings state
+            setSettings((prev) => ({ ...prev, cellSize: clamped }));
+            try { localStorage.setItem(STORAGE_KEY_CELL_SIZE, String(clamped)); } catch { }
+
+            // Resize grid with new cell size (preserves data where possible)
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            grid.resizeCellSize(w, h, clamped);
+
+            const newCols = grid.cols;
+            const newRows = grid.rows;
+
+            // --- Same logic as handleGridResize ---
+            const layers = contentLayersRef.current;
+
+            if (layers.length > 0) {
+                const textLayer = layers.find((l) => l.type === "text") as
+                    | (ContentLayer & { type: "text" })
+                    | undefined;
+                const patternLayers = layers.filter((l) => l.type === "pattern");
+                const isMarquee =
+                    textLayer &&
+                    !textLayer.wrap &&
+                    measureText(textLayer.text, textLayer.scale) > newCols;
+
+                if (isMarquee && textLayer) {
+                    let baseData: Uint8ClampedArray | undefined;
+                    if (patternLayers.length > 0) {
+                        baseData = new Uint8ClampedArray(newCols * newRows * 3);
+                        for (const layer of patternLayers) {
+                            baseData.fill(0);
+                            (layer as ContentLayer & { type: "pattern" }).fn(newCols, newRows, baseData);
+                        }
+                    }
+                    const { buffer, bufferCols } = renderTextToWideBuffer(
+                        textLayer.text, newCols, newRows,
+                        textLayer.color, textLayer.scale, baseData,
+                    );
+                    setMarqueeBuffer(buffer, bufferCols);
+
+                    const newSnap = new Uint8ClampedArray(newCols * newRows * 3);
+                    if (baseData) newSnap.set(baseData);
+                    snapshotRef.current = newSnap;
+                    captureSnapshot(snapshotRef.current);
+                    grid.loadData(snapshotRef.current);
+                } else {
+                    const buf = new Uint8ClampedArray(newCols * newRows * 3);
+                    replayLayers(layers, newCols, newRows, buf);
+
+                    if (animRef.current?.currentAnimation?.name === "Text Marquee") {
+                        setMarqueeBuffer(null);
+                    }
+
+                    if (snapshotRef.current) {
+                        snapshotRef.current = buf;
+                        captureSnapshot(snapshotRef.current);
+                        grid.loadData(snapshotRef.current);
+                    } else {
+                        grid.loadData(buf);
+                    }
+                }
+            } else {
+                // No tracked layers — snapshot was already resized by resizeCellSize (copy-preserve)
+                if (snapshotRef.current) {
+                    const newSnap = new Uint8ClampedArray(newCols * newRows * 3);
+                    const copyCols = Math.min(oldCols, newCols);
+                    const copyRows = Math.min(oldRows, newRows);
+                    for (let r = 0; r < copyRows; r++) {
+                        for (let c = 0; c < copyCols; c++) {
+                            const si = (r * oldCols + c) * 3;
+                            const di = (r * newCols + c) * 3;
+                            newSnap[di] = snapshotRef.current[si];
+                            newSnap[di + 1] = snapshotRef.current[si + 1];
+                            newSnap[di + 2] = snapshotRef.current[si + 2];
+                        }
+                    }
+                    snapshotRef.current = newSnap;
+                    captureSnapshot(snapshotRef.current);
+                }
+            }
+
+            // Clear undo stack (data sizes changed)
+            undoStackRef.current = [];
+            setCanUndo(false);
+
+            setGridDims({ cols: newCols, rows: newRows });
+
+            if (animRef.current) {
+                animRef.current.updateGrid(newCols, newRows, grid.data);
+            }
+            if (effectsRef.current) {
+                effectsRef.current.updateGrid(newCols, newRows);
+                effectsOverlayRef.current = effectsRef.current.overlay;
+            }
+
+            // Force canvas to resize and redraw
+            const canvas = canvasHandleRef.current?.getCanvas();
+            if (canvas) {
+                canvas.width = w;
+                canvas.height = h;
+            }
+            canvasHandleRef.current?.redraw();
+            saveGridToStorage();
+        },
+        [replayLayers, saveGridToStorage],
+    );
+
     // ── Tool change handler (auto-enable effects for vibe) ──
     const handleToolChange = useCallback((tool: ToolKind) => {
         setActiveTool(tool);
@@ -638,6 +772,33 @@ export default function LEDBoard() {
     const handleGestureScroll = useCallback((delta: number) => {
         document.querySelector("[data-gesture-scroll]")?.scrollBy({ top: delta });
     }, []);
+
+    // Full open-hand swipe — stop everything and clear the board
+    const handleGestureSwipeClear = useCallback(() => {
+        // Stop animation if running
+        if (animRef.current && animRef.current.state !== "stopped") {
+            animRef.current.stop();
+            setMarqueeBuffer(null);
+            if (snapshotRef.current) {
+                snapshotRef.current = null;
+            }
+            setCurrentAnim(null);
+            setAnimFrame(0);
+            try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
+            strokeRecorder.resume();
+        }
+        // Clear effects
+        effectsRef.current?.clearEffects();
+        // Clear the board
+        strokeRecorder.clear();
+        contentLayersRef.current = [];
+        gridRef.current?.clear();
+        canvasHandleRef.current?.redraw();
+        // Clear undo stack
+        undoStackRef.current = [];
+        setCanUndo(false);
+        saveGridToStorage();
+    }, [saveGridToStorage]);
 
     // Status change from GestureController
     const handleGestureStatus = useCallback(
@@ -1026,6 +1187,7 @@ export default function LEDBoard() {
                         onPinchAt={handleGesturePinchAt}
                         onPinchRelease={handleGesturePinchRelease}
                         onScroll={handleGestureScroll}
+                        onSlapClear={handleGestureSwipeClear}
                         onStatusChange={handleGestureStatus}
                     />
                 </>
@@ -1046,6 +1208,7 @@ export default function LEDBoard() {
                 canUndo={canUndo}
                 onApplyPattern={handleApplyPattern}
                 onRenderText={handleRenderText}
+                onCellSizeChange={handleCellSizeChange}
                 // Animation props
                 animState={animState}
                 currentAnim={currentAnim}
