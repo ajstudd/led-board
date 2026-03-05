@@ -89,6 +89,8 @@ interface ControlPanelProps {
     recFrameCount: number;
     recDuration: number;
     recPlaybackFrame: number;
+    loopEnabled: boolean;
+    onToggleLoop: () => void;
     onStartRecording: () => void;
     onStopRecording: () => void;
     onStartPlayback: () => void;
@@ -192,6 +194,8 @@ export default function ControlPanel({
     recFrameCount,
     recDuration,
     recPlaybackFrame,
+    loopEnabled,
+    onToggleLoop,
     onStartRecording,
     onStopRecording,
     onStartPlayback,
@@ -440,6 +444,8 @@ export default function ControlPanel({
                     frameCount={recFrameCount}
                     duration={recDuration}
                     playbackFrame={recPlaybackFrame}
+                    loopEnabled={loopEnabled}
+                    onToggleLoop={onToggleLoop}
                     onStartRecording={onStartRecording}
                     onStopRecording={onStopRecording}
                     onStartPlayback={onStartPlayback}

@@ -84,6 +84,8 @@ export default function LEDBoard() {
     const [recDuration, setRecDuration] = useState(0);
     const [recPlaybackFrame, setRecPlaybackFrame] = useState(0);
     const [recHasRecording, setRecHasRecording] = useState(false);
+    const [loopEnabled, setLoopEnabled] = useState(false);
+    const [showPlaybackBar, setShowPlaybackBar] = useState(true);
     /** Tracks whether animation was playing before recording playback started */
     const animWasPlayingBeforePlayback = useRef(false);
 
@@ -1201,8 +1203,9 @@ export default function LEDBoard() {
         } else {
             animWasPlayingBeforePlayback.current = false;
         }
-        sessionRecRef.current.startPlayback(false);
-    }, []);
+        setShowPlaybackBar(true);
+        sessionRecRef.current.startPlayback(loopEnabled);
+    }, [loopEnabled]);
 
     const handlePausePlayback = useCallback(() => {
         sessionRecRef.current.pausePlayback();
@@ -1408,6 +1411,14 @@ export default function LEDBoard() {
                 recPlaybackFrame={recPlaybackFrame}
                 onStartRecording={handleStartRecording}
                 onStopRecording={handleStopRecording}
+                loopEnabled={loopEnabled}
+                onToggleLoop={() => {
+                    setLoopEnabled(v => {
+                        const next = !v;
+                        sessionRecRef.current.setLooping(next);
+                        return next;
+                    });
+                }}
                 onStartPlayback={handleStartPlayback}
                 onPausePlayback={handlePausePlayback}
                 onStopPlayback={handleStopPlayback}
@@ -1436,6 +1447,75 @@ export default function LEDBoard() {
                 onToggleGestureCamera={() => setGestureShowCamera((v) => !v)}
                 panelRef={panelRef}
             />
+
+            {/* Floating playback mini-bar */}
+            {(recordingState === "playing" || recordingState === "paused") && showPlaybackBar && (
+                <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-full bg-black/80 backdrop-blur-md px-4 py-2 shadow-lg border border-white/10 text-xs font-mono select-none pointer-events-auto">
+                    {/* State indicator */}
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${recordingState === "playing" ? "bg-green-500 animate-pulse" : "bg-yellow-500"}`} />
+
+                    {/* Play / Pause */}
+                    {recordingState === "playing" ? (
+                        <button
+                            onClick={handlePausePlayback}
+                            className="flex items-center justify-center rounded-full bg-yellow-500/20 text-yellow-300 w-7 h-7 hover:bg-yellow-500/40 transition"
+                            title="Pause"
+                        >
+                            <svg width={12} height={12} viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="2" width="3.5" height="12" rx="0.5" /><rect x="9.5" y="2" width="3.5" height="12" rx="0.5" /></svg>
+                        </button>
+                    ) : (
+                        <button
+                            onClick={handleStartPlayback}
+                            className="flex items-center justify-center rounded-full bg-green-500/20 text-green-300 w-7 h-7 hover:bg-green-500/40 transition"
+                            title="Resume"
+                        >
+                            <svg width={12} height={12} viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z" /></svg>
+                        </button>
+                    )}
+
+                    {/* Stop */}
+                    <button
+                        onClick={handleStopPlayback}
+                        className="flex items-center justify-center rounded-full bg-white/10 text-white/60 w-7 h-7 hover:bg-white/20 transition"
+                        title="Stop"
+                    >
+                        <svg width={12} height={12} viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1" /></svg>
+                    </button>
+
+                    {/* Loop toggle */}
+                    <button
+                        onClick={() => {
+                            setLoopEnabled(v => {
+                                const next = !v;
+                                sessionRecRef.current.setLooping(next);
+                                return next;
+                            });
+                        }}
+                        className={`flex items-center justify-center rounded-full w-7 h-7 transition ${loopEnabled ? "bg-green-500/30 text-green-300 hover:bg-green-500/50" : "bg-white/10 text-white/40 hover:bg-white/20"}`}
+                        title={loopEnabled ? "Loop: ON" : "Loop: OFF"}
+                    >
+                        <svg width={12} height={12} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M2 8a6 6 0 0110.5-4" /><path d="M14 8a6 6 0 01-10.5 4" /><path d="M12.5 1v3h-3" /><path d="M3.5 15v-3h3" />
+                        </svg>
+                    </button>
+
+                    {/* Frame info */}
+                    <span className="text-white/50 text-[10px] tabular-nums ml-1">
+                        {recPlaybackFrame + 1}/{recFrameCount}
+                    </span>
+
+                    {/* Dismiss */}
+                    <button
+                        onClick={() => setShowPlaybackBar(false)}
+                        className="flex items-center justify-center rounded-full bg-white/5 text-white/30 w-5 h-5 hover:bg-white/20 hover:text-white/70 transition ml-1"
+                        title="Hide controls"
+                    >
+                        <svg width={8} height={8} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                            <path d="M4 4l8 8M12 4l-8 8" />
+                        </svg>
+                    </button>
+                </div>
+            )}
 
             {/* Fullscreen button — hidden when already fullscreen */}
             {!isFullscreen && (

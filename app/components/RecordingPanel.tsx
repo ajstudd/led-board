@@ -9,6 +9,8 @@ interface RecordingPanelProps {
     frameCount: number;
     duration: number;
     playbackFrame: number;
+    loopEnabled: boolean;
+    onToggleLoop: () => void;
     onStartRecording: () => void;
     onStopRecording: () => void;
     onStartPlayback: () => void;
@@ -84,6 +86,17 @@ function TrashIcon({ size = 12 }: { size?: number }) {
     );
 }
 
+function LoopIcon({ size = 12 }: { size?: number }) {
+    return (
+        <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 8a6 6 0 0110.5-4" />
+            <path d="M14 8a6 6 0 01-10.5 4" />
+            <path d="M12.5 1v3h-3" />
+            <path d="M3.5 15v-3h3" />
+        </svg>
+    );
+}
+
 function formatDuration(ms: number): string {
     const secs = Math.floor(ms / 1000);
     const mins = Math.floor(secs / 60);
@@ -98,6 +111,8 @@ export default function RecordingPanel({
     frameCount,
     duration,
     playbackFrame,
+    loopEnabled,
+    onToggleLoop,
     onStartRecording,
     onStopRecording,
     onStartPlayback,
@@ -181,8 +196,8 @@ export default function RecordingPanel({
                                 onClick={onStartRecording}
                                 disabled={isPlaying || isPaused}
                                 className={`flex items-center gap-1 rounded px-2 py-1.5 transition text-[10px] min-h-9 sm:min-h-0 ${isPlaying || isPaused
-                                        ? "bg-white/5 text-white/20 cursor-not-allowed"
-                                        : "bg-red-500/20 text-red-300 hover:bg-red-500/40"
+                                    ? "bg-white/5 text-white/20 cursor-not-allowed"
+                                    : "bg-red-500/20 text-red-300 hover:bg-red-500/40"
                                     }`}
                                 title="Start Recording"
                             >
@@ -222,6 +237,18 @@ export default function RecordingPanel({
                                         <StopIcon size={10} />
                                     </button>
                                 )}
+
+                                {/* Loop toggle */}
+                                <button
+                                    onClick={onToggleLoop}
+                                    className={`flex items-center justify-center rounded px-2 py-1.5 transition text-[10px] min-h-9 sm:min-h-0 ${loopEnabled
+                                            ? "bg-green-500/30 text-green-300 hover:bg-green-500/50"
+                                            : "bg-white/10 text-white/40 hover:bg-white/20"
+                                        }`}
+                                    title={loopEnabled ? "Loop: ON" : "Loop: OFF"}
+                                >
+                                    <LoopIcon size={10} />
+                                </button>
                             </>
                         )}
                     </div>

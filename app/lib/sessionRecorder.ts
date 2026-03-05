@@ -137,6 +137,15 @@ export class SessionRecorder {
     return this._playbackFrame;
   }
 
+  get looping(): boolean {
+    return this._looping;
+  }
+
+  /** Set looping on/off — can be called even during playback */
+  setLooping(v: boolean): void {
+    this._looping = v;
+  }
+
   // ── Recording ────────────────────────────────────────
 
   startRecording(): void {
@@ -237,13 +246,19 @@ export class SessionRecorder {
     const elapsed = performance.now() - this._playbackStart;
     const totalDuration = this._frames[this._frames.length - 1].ts;
 
-    let effectiveElapsed = elapsed;
-    if (this._looping && totalDuration > 0) {
-      effectiveElapsed = elapsed % (totalDuration + 500); // 500ms gap between loops
+    // Stop at the end when not looping
+    if (!this._looping && elapsed >= totalDuration) {
+      this._renderFrame(this._frames.length - 1);
+      this._state = "idle";
+      this._onStateChange?.("idle");
+      return;
     }
 
-    // Find the frame to display
-    let frameIdx = this._playbackFrame;
+    // Wrap elapsed time for looping — always search from frame 0 so rewind works
+    const effectiveElapsed =
+      this._looping && totalDuration > 0 ? elapsed % totalDuration : elapsed;
+
+    let frameIdx = this._looping ? 0 : this._playbackFrame;
     while (
       frameIdx < this._frames.length - 1 &&
       this._frames[frameIdx + 1].ts <= effectiveElapsed
@@ -251,25 +266,6 @@ export class SessionRecorder {
       frameIdx++;
     }
 
-    // Handle end of playback
-    if (effectiveElapsed > totalDuration) {
-      if (this._looping) {
-        // Reset for next loop cycle
-        if (effectiveElapsed > totalDuration + 500) {
-          this._playbackStart = performance.now();
-          this._playbackFrame = 0;
-          frameIdx = 0;
-        }
-      } else {
-        // Render last frame and stop
-        this._renderFrame(this._frames.length - 1);
-        this._state = "idle";
-        this._onStateChange?.("idle");
-        return;
-      }
-    }
-
-    // Always render the current frame (needed to ensure display stays updated)
     this._renderFrame(frameIdx);
     if (frameIdx !== this._playbackFrame) {
       this._playbackFrame = frameIdx;
