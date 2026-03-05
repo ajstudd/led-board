@@ -536,46 +536,7 @@ function replayDrawTick(
 }
 
 // ═══════════════════════════════════════════════════════
-//  14. Replay Loop — replays then restarts continuously
-// ═══════════════════════════════════════════════════════
-
-function replayLoopTick(
-  cols: number,
-  rows: number,
-  data: Uint8ClampedArray,
-  frame: number,
-) {
-  if (frame === 0) {
-    replayEntries = strokeRecorder.entries;
-  }
-
-  const total = replayEntries.length;
-  if (total === 0) {
-    if (snapshot) data.set(snapshot);
-    return;
-  }
-
-  const speed = Math.max(1, Math.floor(total / 120));
-  // Total draw frames + 30 frames of "hold" before looping
-  const drawFrames = Math.ceil(total / speed);
-  const cycleLen = drawFrames + 30;
-  const cycleFrame = frame % cycleLen;
-  const revealed = Math.min(total, cycleFrame * speed);
-
-  data.fill(0);
-  for (let k = 0; k < revealed; k++) {
-    const e = replayEntries[k];
-    if (e.col >= 0 && e.col < cols && e.row >= 0 && e.row < rows) {
-      const idx = (e.row * cols + e.col) * 3;
-      data[idx] = e.r;
-      data[idx + 1] = e.g;
-      data[idx + 2] = e.b;
-    }
-  }
-}
-
-// ═══════════════════════════════════════════════════════
-//  15. Replay Reverse — plays back strokes in reverse
+//  14. Replay Reverse — plays back strokes in reverse
 // ═══════════════════════════════════════════════════════
 
 function replayReverseTick(
@@ -669,7 +630,6 @@ export const MARQUEE_ANIMATION: AnimationConfig = {
 
 export const ANIMATIONS: AnimationConfig[] = [
   { name: "Replay Draw", fps: 30, tick: replayDrawTick },
-  { name: "Replay Loop", fps: 30, tick: replayLoopTick },
   { name: "Replay Reverse", fps: 30, tick: replayReverseTick },
   { name: "Pulse", fps: 30, tick: pulseTick },
   { name: "Rainbow Cycle", fps: 25, tick: rainbowCycleTick },

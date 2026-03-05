@@ -11,6 +11,7 @@ import { ANIMATIONS, MARQUEE_ANIMATION, captureSnapshot, updateSnapshotPixel, se
 import { strokeRecorder } from "../lib/recorder";
 import { uint8ToBase64, base64ToUint8 } from "../lib/utils";
 import { EffectsEngine, EffectPreset, EFFECT_PRESETS, EffectsOverlay } from "../lib/effects";
+import { SessionRecorder, RecordingState, sessionRecorder } from "../lib/sessionRecorder";
 import GestureController, { GestureLoadState } from "./GestureController";
 
 const STORAGE_KEY_COLOR = "tenix-color";
@@ -76,6 +77,16 @@ export default function LEDBoard() {
     const strokeActiveRef = useRef(false);
     const [canUndo, setCanUndo] = useState(false);
 
+    // ── Session recording state ────────────────────────
+    const sessionRecRef = useRef<SessionRecorder>(sessionRecorder);
+    const [recordingState, setRecordingState] = useState<RecordingState>("idle");
+    const [recFrameCount, setRecFrameCount] = useState(0);
+    const [recDuration, setRecDuration] = useState(0);
+    const [recPlaybackFrame, setRecPlaybackFrame] = useState(0);
+    const [recHasRecording, setRecHasRecording] = useState(false);
+    /** Tracks whether animation was playing before recording playback started */
+    const animWasPlayingBeforePlayback = useRef(false);
+
     // ── Fullscreen state ────────────────────────────────
     const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -100,7 +111,7 @@ export default function LEDBoard() {
             }
         } catch { /* ignore */ }
         if (cellSize !== DEFAULT_SETTINGS.cellSize) {
-            setSettings((prev) => ({ ...prev, cellSize }));
+            queueMicrotask(() => setSettings((prev) => ({ ...prev, cellSize })));
         }
 
         const w = window.innerWidth;
@@ -133,7 +144,6 @@ export default function LEDBoard() {
 
         // Redraw after loading (canvas effect may have run before data was loaded)
         requestAnimationFrame(() => canvasHandleRef.current?.redraw());
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // ── Initialise animation manager ─────────────────────
@@ -199,6 +209,63 @@ export default function LEDBoard() {
             engine.destroy();
         };
     }, []);
+
+    // ── Initialise session recorder ───────────────────────
+    useEffect(() => {
+        const rec = sessionRecRef.current;
+        const grid = gridRef.current;
+        if (!grid) return;
+
+        rec.configure({
+            cols: grid.cols,
+            rows: grid.rows,
+            captureFps: 30,
+            getGridData: () => {
+                const g = gridRef.current;
+                if (!g) return null;
+                const raw = g.data;
+                const overlay = effectsOverlayRef.current;
+                if (!overlay?.buffer || overlay.cols === 0) return raw;
+                const len = g.cols * g.rows;
+                const out = new Uint8ClampedArray(len * 3);
+                const buf = overlay.buffer;
+                for (let i = 0, j = 0; i < len; i++, j += 4) {
+                    const si = i * 3;
+                    const a = buf[j + 3] / 255;
+                    out[si] = Math.min(255, raw[si] + buf[j] * a);
+                    out[si + 1] = Math.min(255, raw[si + 1] + buf[j + 1] * a);
+                    out[si + 2] = Math.min(255, raw[si + 2] + buf[j + 2] * a);
+                }
+                return out;
+            },
+            setGridData: (data: Uint8ClampedArray) => {
+                gridRef.current?.loadData(data);
+            },
+            redraw: () => canvasHandleRef.current?.redraw(),
+            onStateChange: (state: RecordingState) => {
+                setRecordingState(state);
+                setRecHasRecording(rec.hasRecording);
+            },
+            onPlaybackFrame: (frame: number) => {
+                setRecPlaybackFrame(frame);
+            },
+        });
+
+        return () => {
+            rec.destroy();
+        };
+    }, []);
+
+    // Sync recording stats periodically while recording
+    useEffect(() => {
+        if (recordingState !== "recording") return;
+        const id = setInterval(() => {
+            const rec = sessionRecRef.current;
+            setRecFrameCount(rec.frameCount);
+            setRecDuration(rec.duration);
+        }, 200);
+        return () => clearInterval(id);
+    }, [recordingState]);
 
     // Sync frame counter periodically while playing
     useEffect(() => {
@@ -402,6 +469,9 @@ export default function LEDBoard() {
                 effectsRef.current.updateGrid(newCols, newRows);
                 effectsOverlayRef.current = effectsRef.current.overlay;
             }
+
+            // Keep session recorder in sync
+            sessionRecRef.current.updateGrid(newCols, newRows);
         },
         [replayLayers],
     );
@@ -512,6 +582,9 @@ export default function LEDBoard() {
                 effectsRef.current.updateGrid(newCols, newRows);
                 effectsOverlayRef.current = effectsRef.current.overlay;
             }
+
+            // Keep session recorder in sync
+            sessionRecRef.current.updateGrid(newCols, newRows);
 
             // Force canvas to resize and redraw
             const canvas = canvasHandleRef.current?.getCanvas();
@@ -1067,6 +1140,114 @@ export default function LEDBoard() {
         try { localStorage.setItem(STORAGE_KEY_EFFECT_SPEED, String(v)); } catch { }
     }, []);
 
+    // ── Session recording controls ────────────────────────
+    const handleStartRecording = useCallback(() => {
+        const rec = sessionRecRef.current;
+        const grid = gridRef.current;
+        if (!grid) return;
+        rec.configure({
+            cols: grid.cols,
+            rows: grid.rows,
+            captureFps: 30,
+            getGridData: () => {
+                const g = gridRef.current;
+                if (!g) return null;
+                const raw = g.data;
+                const overlay = effectsOverlayRef.current;
+                if (!overlay?.buffer || overlay.cols === 0) return raw;
+                const len = g.cols * g.rows;
+                const out = new Uint8ClampedArray(len * 3);
+                const buf = overlay.buffer;
+                for (let i = 0, j = 0; i < len; i++, j += 4) {
+                    const si = i * 3;
+                    const a = buf[j + 3] / 255;
+                    out[si] = Math.min(255, raw[si] + buf[j] * a);
+                    out[si + 1] = Math.min(255, raw[si + 1] + buf[j + 1] * a);
+                    out[si + 2] = Math.min(255, raw[si + 2] + buf[j + 2] * a);
+                }
+                return out;
+            },
+            setGridData: (data: Uint8ClampedArray) => {
+                gridRef.current?.loadData(data);
+            },
+            redraw: () => canvasHandleRef.current?.redraw(),
+            onStateChange: (state: RecordingState) => {
+                setRecordingState(state);
+                setRecHasRecording(rec.hasRecording);
+            },
+            onPlaybackFrame: (frame: number) => {
+                setRecPlaybackFrame(frame);
+            },
+        });
+        rec.startRecording();
+        setRecFrameCount(0);
+        setRecDuration(0);
+    }, []);
+
+    const handleStopRecording = useCallback(() => {
+        const rec = sessionRecRef.current;
+        rec.stopRecording();
+        setRecFrameCount(rec.frameCount);
+        setRecDuration(rec.duration);
+        setRecHasRecording(rec.hasRecording);
+    }, []);
+
+    const handleStartPlayback = useCallback(() => {
+        // Pause any running animation so it doesn't overwrite grid data
+        const mgr = animRef.current;
+        if (mgr && mgr.state === "playing") {
+            mgr.pause();
+            animWasPlayingBeforePlayback.current = true;
+        } else {
+            animWasPlayingBeforePlayback.current = false;
+        }
+        sessionRecRef.current.startPlayback(false);
+    }, []);
+
+    const handlePausePlayback = useCallback(() => {
+        sessionRecRef.current.pausePlayback();
+    }, []);
+
+    const handleStopPlayback = useCallback(() => {
+        sessionRecRef.current.stopPlayback();
+        // Restore the grid to whatever was there before playback
+        const grid = gridRef.current;
+        if (grid && snapshotRef.current) {
+            grid.loadData(snapshotRef.current);
+            canvasHandleRef.current?.redraw();
+        } else if (grid) {
+            canvasHandleRef.current?.redraw();
+        }
+        // Resume animation if it was playing before
+        if (animWasPlayingBeforePlayback.current) {
+            animWasPlayingBeforePlayback.current = false;
+            animRef.current?.play();
+        }
+    }, []);
+
+    const handleExportRecording = useCallback(() => {
+        sessionRecRef.current.downloadRecording();
+    }, []);
+
+    const handleImportRecording = useCallback(async (file: File) => {
+        const rec = sessionRecRef.current;
+        const ok = await rec.loadFromFileInput(file);
+        if (ok) {
+            setRecFrameCount(rec.frameCount);
+            setRecDuration(rec.duration);
+            setRecHasRecording(rec.hasRecording);
+            setRecordingState("idle");
+        }
+    }, []);
+
+    const handleClearRecording = useCallback(() => {
+        sessionRecRef.current.clear();
+        setRecFrameCount(0);
+        setRecDuration(0);
+        setRecHasRecording(false);
+        setRecPlaybackFrame(0);
+    }, []);
+
     // ── Fullscreen tracking ──────────────────────────────
     useEffect(() => {
         const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -1219,6 +1400,20 @@ export default function LEDBoard() {
                 onAnimPause={handleAnimPause}
                 onAnimStop={handleAnimStop}
                 onAnimFpsChange={handleAnimFpsChange}
+                // Recording props
+                recordingState={recordingState}
+                hasRecording={recHasRecording}
+                recFrameCount={recFrameCount}
+                recDuration={recDuration}
+                recPlaybackFrame={recPlaybackFrame}
+                onStartRecording={handleStartRecording}
+                onStopRecording={handleStopRecording}
+                onStartPlayback={handleStartPlayback}
+                onPausePlayback={handlePausePlayback}
+                onStopPlayback={handleStopPlayback}
+                onExportRecording={handleExportRecording}
+                onImportRecording={handleImportRecording}
+                onClearRecording={handleClearRecording}
                 // Effects props
                 effectsEnabled={effectsEnabled}
                 activeEffectPreset={activeEffectPreset}

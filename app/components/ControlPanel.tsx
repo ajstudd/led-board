@@ -5,8 +5,10 @@ import { ToolKind, RGB, BoardSettings, AnimationConfig } from "../types";
 import ColorPicker from "./ColorPicker";
 import PatternSelector from "./PatternSelector";
 import AnimationPanel from "./AnimationPanel";
+import RecordingPanel from "./RecordingPanel";
 import EffectsPanel from "./EffectsPanel";
 import { AnimationState } from "../lib/animation";
+import { RecordingState } from "../lib/sessionRecorder";
 import { EffectPreset } from "../lib/effects";
 import InfoTooltip from "./InfoTooltip";
 
@@ -81,6 +83,20 @@ interface ControlPanelProps {
     onAnimPause: () => void;
     onAnimStop: () => void;
     onAnimFpsChange: (fps: number) => void;
+    // Recording
+    recordingState: RecordingState;
+    hasRecording: boolean;
+    recFrameCount: number;
+    recDuration: number;
+    recPlaybackFrame: number;
+    onStartRecording: () => void;
+    onStopRecording: () => void;
+    onStartPlayback: () => void;
+    onPausePlayback: () => void;
+    onStopPlayback: () => void;
+    onExportRecording: () => void;
+    onImportRecording: (file: File) => void;
+    onClearRecording: () => void;
     // Effects
     effectsEnabled: boolean;
     activeEffectPreset: EffectPreset;
@@ -171,6 +187,19 @@ export default function ControlPanel({
     onAnimPause,
     onAnimStop,
     onAnimFpsChange,
+    recordingState,
+    hasRecording,
+    recFrameCount,
+    recDuration,
+    recPlaybackFrame,
+    onStartRecording,
+    onStopRecording,
+    onStartPlayback,
+    onPausePlayback,
+    onStopPlayback,
+    onExportRecording,
+    onImportRecording,
+    onClearRecording,
     effectsEnabled,
     activeEffectPreset,
     effectsDistanceMultiplier,
@@ -399,6 +428,26 @@ export default function ControlPanel({
                     onPause={onAnimPause}
                     onStop={onAnimStop}
                     onFpsChange={onAnimFpsChange}
+                />
+
+                {/* Separator */}
+                <div className="h-px bg-white/10" />
+
+                {/* Session Recording */}
+                <RecordingPanel
+                    recordingState={recordingState}
+                    hasRecording={hasRecording}
+                    frameCount={recFrameCount}
+                    duration={recDuration}
+                    playbackFrame={recPlaybackFrame}
+                    onStartRecording={onStartRecording}
+                    onStopRecording={onStopRecording}
+                    onStartPlayback={onStartPlayback}
+                    onPausePlayback={onPausePlayback}
+                    onStopPlayback={onStopPlayback}
+                    onExportRecording={onExportRecording}
+                    onImportRecording={onImportRecording}
+                    onClearRecording={onClearRecording}
                 />
 
                 {/* Separator */}
