@@ -1,5 +1,6 @@
 import { RGB } from "../types";
 import { hslToRgb } from "./utils";
+import { GLEffectsRenderer } from "./effects-gl";
 
 // ── Effect Preset Definition ──────────────────────────
 export interface EffectPreset {
@@ -317,6 +318,8 @@ interface ActiveEffect {
   hsl: [number, number, number];
   age: number;
   preset: EffectPreset;
+  /** Index into EFFECT_PRESETS (0–7) for GPU dispatch */
+  presetIndex: number;
   /** Effective values after applying multipliers */
   effectiveMaxAge: number;
   effectiveMaxRadius: number;
@@ -376,6 +379,8 @@ export class EffectsEngine {
   private _lastTrigger: { col: number; row: number; time: number } | null =
     null;
   private _triggerCooldown = 30; // ms between triggers on same cell
+  /** GPU-accelerated renderer (null if WebGL unavailable) */
+  private _gl: GLEffectsRenderer | null = null;
 
   constructor(redraw: () => void) {
     this._redraw = redraw;
@@ -434,6 +439,14 @@ export class EffectsEngine {
       cols,
       rows,
     };
+
+    // Initialise or resize the GPU renderer
+    if (!this._gl) {
+      this._gl = GLEffectsRenderer.create();
+    }
+    if (this._gl) {
+      this._gl.resize(cols, rows);
+    }
   }
 
   // ── Trigger an effect ───────────────────────────────
@@ -474,6 +487,7 @@ export class EffectsEngine {
       hsl,
       age: 0,
       preset: this._preset,
+      presetIndex: EFFECT_PRESETS.indexOf(this._preset),
       effectiveMaxAge,
       effectiveMaxRadius,
     });
@@ -503,6 +517,10 @@ export class EffectsEngine {
     if (this._rafId) {
       cancelAnimationFrame(this._rafId);
       this._rafId = 0;
+    }
+    if (this._gl) {
+      this._gl.destroy();
+      this._gl = null;
     }
   }
 
@@ -537,9 +555,6 @@ export class EffectsEngine {
 
     const cols = this._cols;
 
-    // Clear overlay
-    buf.fill(0);
-
     // Remove dead effects (in-place for less GC pressure)
     let writeIdx = 0;
     for (let i = 0; i < this.effects.length; i++) {
@@ -548,6 +563,18 @@ export class EffectsEngine {
       }
     }
     this.effects.length = writeIdx;
+
+    // ── GPU path ──────────────────────────────────────────
+    if (this._gl) {
+      this._gl.render(this.effects, buf);
+      for (let i = 0; i < this.effects.length; i++) {
+        this.effects[i].age++;
+      }
+      return;
+    }
+
+    // ── CPU fallback path ─────────────────────────────────
+    buf.fill(0);
 
     for (let ei = 0; ei < this.effects.length; ei++) {
       const effect = this.effects[ei];
