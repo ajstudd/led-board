@@ -109,7 +109,7 @@ export default function LEDBoard() {
             const saved = localStorage.getItem(STORAGE_KEY_CELL_SIZE);
             if (saved) {
                 const v = parseInt(saved, 10);
-                if (!isNaN(v) && v >= 2 && v <= 40) cellSize = v;
+                if (!isNaN(v) && v >= 1 && v <= 40) cellSize = v;
             }
         } catch { /* ignore */ }
         if (cellSize !== DEFAULT_SETTINGS.cellSize) {
@@ -484,7 +484,7 @@ export default function LEDBoard() {
             const grid = gridRef.current;
             if (!grid) return;
 
-            const clamped = Math.max(2, Math.min(40, Math.round(newSize)));
+            const clamped = Math.max(1, Math.min(40, Math.round(newSize)));
             if (clamped === grid.cellSize) return;
 
             const oldCols = grid.cols;

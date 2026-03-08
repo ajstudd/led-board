@@ -50,33 +50,43 @@ export const EFFECT_PRESETS: EffectPreset[] = [
     hueShift: (dist) => dist * 8,
   },
 
-  // 2. Wave — horizontal wave spreading left and right
+  // 2. Wave — S-shaped water wave spreading horizontally
   {
     name: "Wave",
-    maxAge: 30,
-    maxRadius: 20,
+    maxAge: 40,
+    maxRadius: 24,
     intensity: (dx, dy, _dist, age, maxAge, maxRadius) => {
       const progress = age / maxAge;
-      const currentSpread = progress * maxRadius;
-      const absDx = Math.abs(dx);
-      const absDy = Math.abs(dy);
-      if (absDx > currentSpread) return 0;
-      // Vertical falloff — wave is thin
-      const waveHeight = 1.5 + progress * 1.0;
-      if (absDy > waveHeight) return 0;
-      // Wave front effect
-      const frontDist = Math.abs(absDx - currentSpread);
-      if (frontDist > 3) return 0;
-      const fade = 1 - Math.pow(progress, 0.6);
-      const yFade = 1 - absDy / waveHeight;
-      const frontFade = 1 - frontDist / 3;
-      // Sinusoidal ripple along the wave
-      const wave = (Math.sin(absDx * 0.8 - age * 0.4) + 1) / 2;
-      return frontFade * yFade * fade * (0.4 + 0.6 * wave);
+      const fade = 1 - Math.pow(progress, 0.5);
+      let maxI = 0;
+      // 3 S-wave fronts spreading left and right
+      for (let w = 0; w < 3; w++) {
+        const delay = w * 5;
+        const effAge = age - delay;
+        if (effAge < 0) continue;
+        const wp = effAge / (maxAge - delay);
+        if (wp > 1) continue;
+        const spread = wp * maxRadius;
+        const absDx = Math.abs(dx);
+        if (absDx > spread + 1) continue;
+        // S-wave: vertical offset follows sine curve
+        const amplitude = 1.5 + wp * 2.5;
+        const waveY = amplitude * Math.sin(dx * 0.6 - effAge * 0.25);
+        const distFromCurve = Math.abs(dy - waveY);
+        const thickness = 1.2 + wp * 0.8 - w * 0.2;
+        if (distFromCurve > thickness) continue;
+        // Fade near the spreading tips
+        const tipFade = absDx > spread - 2 ? 1 - (absDx - spread + 2) / 3 : 1;
+        const edgeFade = 1 - distFromCurve / thickness;
+        const waveFade = 1 - w * 0.3;
+        maxI = Math.max(maxI, edgeFade * fade * waveFade * Math.max(tipFade, 0));
+      }
+      return maxI;
     },
+    hueShift: (dist, age) => dist * 6 + age * 4,
   },
 
-  // 3. Raindrop — multiple concentric expanding rings
+  // 3. Raindrop — central splash + filled spreading disk with ripple texture
   {
     name: "Raindrop",
     maxAge: 40,
@@ -84,23 +94,27 @@ export const EFFECT_PRESETS: EffectPreset[] = [
     intensity: (_dx, _dy, dist, age, maxAge, maxRadius) => {
       const progress = age / maxAge;
       const fade = 1 - Math.pow(progress, 0.5);
-      let maxIntensity = 0;
-      // 3 concentric rings at different speeds
-      for (let ring = 0; ring < 3; ring++) {
-        const delay = ring * 4; // stagger start
-        const effectiveAge = age - delay;
-        if (effectiveAge < 0) continue;
-        const ringProgress = effectiveAge / (maxAge - delay);
-        if (ringProgress > 1) continue;
-        const currentRadius = ringProgress * maxRadius * (1 - ring * 0.15);
-        const ringWidth = 0.8 + ringProgress * 0.8;
-        const ringDist = Math.abs(dist - currentRadius);
-        if (ringDist > ringWidth) continue;
-        const ringFade = 1 - ring * 0.25;
-        const intensity = (1 - ringDist / ringWidth) * fade * ringFade;
-        maxIntensity = Math.max(maxIntensity, intensity);
+      // Central splash (first 30% of life) — bright center impact
+      let splashI = 0;
+      if (progress < 0.3) {
+        const sp = progress / 0.3;
+        const splashRadius = 1.5 + sp * 1.0;
+        if (dist < splashRadius) {
+          splashI = (1 - dist / splashRadius) * (1 - sp * 0.5);
+        }
       }
-      return maxIntensity;
+      // Spreading filled disk with internal ripple texture
+      const diskRadius = Math.min(progress * 2.5, 1) * maxRadius;
+      if (dist > diskRadius) return splashI * fade;
+      // Bright edge ring
+      const edgeDist = Math.abs(dist - diskRadius);
+      const edgeWidth = 1.5;
+      const edgeBright = edgeDist < edgeWidth ? (1 - edgeDist / edgeWidth) * 0.7 : 0;
+      // Interior ripple texture (concentric waves inside the disk)
+      const innerRatio = dist / Math.max(diskRadius, 0.01);
+      const ripple = (Math.sin(dist * 2.5 - age * 0.5) + 1) / 2;
+      const interiorI = (1 - innerRatio * 0.6) * 0.25 * (0.4 + 0.6 * ripple);
+      return Math.max(splashI, edgeBright + interiorI) * fade;
     },
     hueShift: (_dist, age) => age * 5,
   },
@@ -184,127 +198,406 @@ export const EFFECT_PRESETS: EffectPreset[] = [
     hueShift: (_dist, age) => age * 12,
   },
 
-  // 7. Laser — DJ-concert-style laser beams shooting in random directions
+  // 7. Laser — DJ-concert-style rotating laser beams with glow halos
   {
     name: "Laser",
-    maxAge: 35,
-    maxRadius: 28,
+    maxAge: 45,
+    maxRadius: 32,
     intensity: (dx, dy, dist, age, maxAge, maxRadius) => {
       if (dist < 0.5) return 1 - age / maxAge;
       const progress = age / maxAge;
-      // Beams extend rapidly, then fade
-      const beamLength = progress * maxRadius;
+      const beamLength = Math.min(progress * 2, 1.0) * maxRadius; // fast extend
       if (dist > beamLength) return 0;
-
       const angle = Math.atan2(dy, dx);
+      // Slow rotation — beams sweep ~15° over lifetime
+      const rotation = age * 0.008;
 
-      // 5 laser beams at pseudo-random but deterministic angles
-      // seeded per-effect via maxAge (stable across frames for one trigger)
-      const numBeams = 5;
+      const numBeams = 7;
       let maxIntensity = 0;
       for (let i = 0; i < numBeams; i++) {
-        // Spread beams around the circle with a golden-angle-like offset
-        const beamAngle = -Math.PI + ((i * 2.399) % (2 * Math.PI)); // golden angle ≈ 137.5°
+        const baseAngle = -Math.PI + ((i * 2.399) % (2 * Math.PI));
+        const beamAngle = baseAngle + rotation;
         let angleDiff = Math.abs(angle - beamAngle);
         if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
 
-        // Beam width: very narrow (laser-thin), tapers slightly with distance
-        const beamWidth = 0.12 + dist * 0.008;
-        if (angleDiff > beamWidth) continue;
+        // Staggered beam lengths for depth
+        const thisLength = beamLength * (0.7 + (i % 3) * 0.15);
+        if (dist > thisLength) continue;
 
-        // Core brightness — bright center, sharp falloff
-        const coreFade = 1 - angleDiff / beamWidth;
-        const core = Math.pow(coreFade, 3); // sharp laser edge
+        // Core beam — sharp but wider than before
+        const beamWidth = 0.16 + dist * 0.01;
+        // Glow halo — softer, wider falloff
+        const haloWidth = beamWidth * 3.5;
 
-        // Distance-based sweep: beam "shoots" outward
-        const tipDist = Math.abs(dist - beamLength);
-        const tipGlow = tipDist < 2 ? 1 - tipDist / 2 : 0;
-        const bodyGlow = 0.3 + 0.7 * (1 - dist / beamLength);
+        let intensity = 0;
+        if (angleDiff < beamWidth) {
+          const coreFade = 1 - angleDiff / beamWidth;
+          intensity = Math.pow(coreFade, 2); // smoother edge than pow(3)
+        } else if (angleDiff < haloWidth) {
+          // Soft glow halo around beam
+          const haloFade = 1 - (angleDiff - beamWidth) / (haloWidth - beamWidth);
+          intensity = Math.pow(haloFade, 3) * 0.35;
+        }
+        if (intensity <= 0) continue;
 
-        // Flicker — subtle high-frequency shimmer
-        const flicker = 0.8 + 0.2 * Math.sin(dist * 3.5 - age * 2 + i * 1.7);
+        const tipDist = Math.abs(dist - thisLength);
+        const tipGlow = tipDist < 3 ? (1 - tipDist / 3) * 0.8 : 0;
+        const bodyGlow = 0.25 + 0.75 * (1 - dist / thisLength);
+        const flicker = 0.85 + 0.15 * Math.sin(dist * 3.0 - age * 1.8 + i * 2.3);
+        const fade = 1 - Math.pow(progress, 0.6);
 
-        const fade = 1 - Math.pow(progress, 0.5);
-        const intensity = core * (bodyGlow + tipGlow * 0.7) * fade * flicker;
-        maxIntensity = Math.max(maxIntensity, intensity);
+        maxIntensity = Math.max(maxIntensity, intensity * (bodyGlow + tipGlow) * fade * flicker);
       }
       return maxIntensity;
     },
-    // Vivid hue cycling — each beam picks up a different colour shift
-    hueShift: (dist, age) => dist * 20 + age * 10,
+    hueShift: (dist, age) => dist * 18 + age * 8,
   },
 
-  // 8. Bubble — expanding bubbles that float outward in random directions
+  // 8. Bubble — floating bubbles with iridescent sheen & smooth pop
   {
     name: "Bubble",
-    maxAge: 50,
-    maxRadius: 20,
-    intensity: (dx, dy, dist, age, maxAge, maxRadius) => {
+    maxAge: 60,
+    maxRadius: 22,
+    intensity: (dx, dy, _dist, age, maxAge, _maxRadius) => {
       const progress = age / maxAge;
-      const fade = 1 - Math.pow(progress, 0.4);
-
-      // Generate 6 bubbles drifting outward in different directions
-      const numBubbles = 6;
+      const fade = 1 - Math.pow(progress, 0.35);
+      const numBubbles = 8;
       let maxIntensity = 0;
 
       for (let i = 0; i < numBubbles; i++) {
-        // Each bubble has a deterministic direction (golden angle spread)
         const bAngle = i * 2.399 + 0.5;
-        const bCos = Math.cos(bAngle);
-        const bSin = Math.sin(bAngle);
-
-        // Bubble drifts outward over time (with slight deceleration)
-        const driftSpeed = 0.6 + (i % 3) * 0.15;
-        const drift = age * driftSpeed * (1 - progress * 0.3);
+        // Wobbling float: sinusoidal offset on drift direction
+        const wobbleAngle = bAngle + 0.3 * Math.sin(age * 0.15 + i * 1.8);
+        const bCos = Math.cos(wobbleAngle);
+        const bSin = Math.sin(wobbleAngle);
+        const driftSpeed = 0.5 + (i % 4) * 0.12;
+        const drift = age * driftSpeed * (1 - progress * 0.25);
         const bx = bCos * drift;
         const by = bSin * drift;
 
-        // Distance from this pixel to the bubble center
         const bdx = dx - bx;
         const bdy = dy - by;
         const bDist = Math.sqrt(bdx * bdx + bdy * bdy);
 
-        // Bubble radius grows then shrinks (pops)
-        const growPhase = Math.min(progress * 3, 1); // quick inflate
-        const popPhase = progress > 0.75 ? (progress - 0.75) / 0.25 : 0;
-        const bubbleRadius = (1.2 + i * 0.2) * growPhase * (1 - popPhase * 0.6);
-        if (bubbleRadius < 0.3) continue;
+        // Smooth pop: expand briefly then fade (no abrupt shrink)
+        const growPhase = Math.min(progress * 3, 1);
+        const popStart = 0.8;
+        const popPhase = progress > popStart ? (progress - popStart) / (1 - popStart) : 0;
+        const sizeVar = 1.0 + i * 0.25;
+        const bubbleRadius = sizeVar * growPhase * (1 + popPhase * 0.5); // expands on pop
+        const popFade = 1 - Math.pow(popPhase, 0.5); // fades out smoothly
+        if (bubbleRadius < 0.3 || popFade < 0.01) continue;
 
-        // Hollow sphere look — bright ring, dim inside
-        const ringWidth = 0.45 + bubbleRadius * 0.15;
+        const ringWidth = 0.5 + bubbleRadius * 0.18;
         const ringDist = Math.abs(bDist - bubbleRadius);
         if (bDist > bubbleRadius + ringWidth) continue;
 
         let intensity: number;
         if (ringDist < ringWidth) {
-          // On the ring edge — bright
-          intensity = (1 - ringDist / ringWidth) * 0.9;
+          intensity = (1 - ringDist / ringWidth) * 0.95;
         } else {
-          // Inside the bubble — subtle inner glow
-          intensity = (1 - bDist / bubbleRadius) * 0.25;
+          // Iridescent inner fill — subtle rainbow gradient
+          const innerRatio = bDist / bubbleRadius;
+          const iridescentWave = (Math.sin(innerRatio * 8 + age * 0.3 + i * 2) + 1) / 2;
+          intensity = (1 - innerRatio) * 0.3 * (0.5 + 0.5 * iridescentWave);
         }
 
-        // Specular highlight — small bright spot on upper-left of bubble
-        const specX = bdx + bubbleRadius * 0.35;
-        const specY = bdy + bubbleRadius * 0.35;
-        const specDist = Math.sqrt(specX * specX + specY * specY);
-        if (specDist < bubbleRadius * 0.35) {
-          intensity += (1 - specDist / (bubbleRadius * 0.35)) * 0.6;
+        // Double specular highlights — top-left & bottom-right
+        const spec1X = bdx + bubbleRadius * 0.3;
+        const spec1Y = bdy + bubbleRadius * 0.3;
+        const spec1Dist = Math.sqrt(spec1X * spec1X + spec1Y * spec1Y);
+        const specR = bubbleRadius * 0.3;
+        if (spec1Dist < specR) {
+          intensity += (1 - spec1Dist / specR) * 0.7;
+        }
+        const spec2X = bdx - bubbleRadius * 0.2;
+        const spec2Y = bdy - bubbleRadius * 0.25;
+        const spec2Dist = Math.sqrt(spec2X * spec2X + spec2Y * spec2Y);
+        if (spec2Dist < specR * 0.7) {
+          intensity += (1 - spec2Dist / (specR * 0.7)) * 0.3;
         }
 
-        // Wobble — subtle oscillation for organic feel
-        const wobble =
-          0.85 + 0.15 * Math.sin(age * 0.5 + i * 2.1 + bDist * 1.2);
-
+        const wobble = 0.85 + 0.15 * Math.sin(age * 0.4 + i * 2.1 + bDist * 1.0);
         maxIntensity = Math.max(
           maxIntensity,
-          Math.min(1, intensity * fade * wobble * (1 - popPhase * 0.5)),
+          Math.min(1, intensity * fade * popFade * wobble),
         );
       }
       return maxIntensity;
     },
-    // Iridescent hue shift — soap-bubble rainbow sheen
-    hueShift: (dist, age) => dist * 25 + age * 6,
+    hueShift: (dist, age) => dist * 30 + age * 5,
+  },
+
+  // 9. Firework — rocket trail → huge explosion pop
+  {
+    name: "Firework",
+    maxAge: 50,
+    maxRadius: 30,
+    intensity: (dx, dy, _dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const launchEnd = 0.12; // 12% of life = fast rocket
+      const travelDist = maxRadius * 0.8;
+
+      // Phase 1: rocket going up
+      if (progress < launchEnd) {
+        const lp = progress / launchEnd;
+        const headY = -lp * travelDist;
+        const hdx = dx;
+        const hdy = dy - headY;
+        const hDist = Math.sqrt(hdx * hdx + hdy * hdy);
+        // Bright 3px rocket head
+        if (hDist < 3.0) return 1.0 - hDist / 3.0;
+        // Thick exhaust trail below
+        const trailLen = lp * travelDist * 0.8;
+        if (Math.abs(hdx) < 2.0 && hdy > 0 && hdy < trailLen) {
+          const fade = 1 - hdy / trailLen;
+          const width = 1 - Math.abs(hdx) / 2.0;
+          const flicker = 0.5 + 0.5 * Math.sin(hdy * 5 + age * 4);
+          return fade * width * flicker * 0.65;
+        }
+        return 0;
+      }
+
+      // Phase 2: explosion
+      const ep = (progress - launchEnd) / (1 - launchEnd);
+      const fade = 1 - Math.pow(ep, 0.3);
+      const peakY = -travelDist;
+      const cdy = dy - peakY;
+      const cDist = Math.sqrt(dx * dx + cdy * cdy);
+      let maxI = 0;
+
+      // Big bright flash at pop center
+      if (ep < 0.25) {
+        const flashR = 5.0 + ep * 15;
+        if (cDist < flashR) {
+          maxI = (1 - cDist / flashR) * (1 - ep / 0.25);
+        }
+      }
+
+      // 12 large sparks with heavy gravity arcs
+      for (let i = 0; i < 12; i++) {
+        const angle = i * (Math.PI * 2 / 12) + 0.2;
+        const speed = 0.7 + (i % 3) * 0.2;
+        const t = ep * maxRadius * 0.6;
+        const sx = Math.cos(angle) * speed * t;
+        const sy = Math.sin(angle) * speed * t + t * t * 0.25; // strong gravity
+        const sdx = dx - sx;
+        const sdy = cdy - sy;
+        const sDist = Math.sqrt(sdx * sdx + sdy * sdy);
+
+        // Big bright spark head (4px radius)
+        if (sDist < 4.0) {
+          const si = (1 - sDist / 4.0) * fade;
+          maxI = Math.max(maxI, si);
+        }
+        // Wide glow halo (8px)
+        if (sDist >= 4.0 && sDist < 8.0) {
+          const gi = (1 - sDist / 8.0) * fade * 0.3;
+          maxI = Math.max(maxI, gi);
+        }
+
+        // Streak trail: check points along the spark's past path
+        for (let s = 1; s <= 4; s++) {
+          const pastEp = Math.max(0, ep - s * 0.04);
+          const pt = pastEp * maxRadius * 0.6;
+          const px = Math.cos(angle) * speed * pt;
+          const py = Math.sin(angle) * speed * pt + pt * pt * 0.25;
+          const pdx = dx - px;
+          const pdy = cdy - py;
+          const pDist = Math.sqrt(pdx * pdx + pdy * pdy);
+          if (pDist < 2.5) {
+            const ti = (1 - pDist / 2.5) * fade * (0.5 - s * 0.1);
+            maxI = Math.max(maxI, ti);
+          }
+        }
+      }
+      return maxI;
+    },
+    hueShift: (dist, age) => dist * 20 + age * 12,
+  },
+
+  // 10. Vortex — inward-flowing whirlpool with bright outer rim
+  {
+    name: "Vortex",
+    maxAge: 55,
+    maxRadius: 18,
+    intensity: (dx, dy, dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const outerRadius = maxRadius * Math.min(progress * 2, 1);
+      if (dist > outerRadius + 1) return 0;
+      const fade = 1 - Math.pow(progress, 0.5);
+
+      // Bright core that accumulates over time
+      if (dist < 1.5) {
+        const coreGrow = Math.min(progress / 0.3, 1);
+        const pulse = 0.7 + 0.3 * Math.sin(age * 0.5);
+        return (1 - dist / 1.5) * fade * coreGrow * pulse;
+      }
+
+      const angle = Math.atan2(dy, dx);
+      // Reverse rotation (opposite of Helix) — feels like inward pull
+      const rotation = -age * 0.3;
+      // Logarithmic spiral arms (tighten inward, unlike Helix linear spiral)
+      const spiralAngle = angle + rotation + Math.log(dist + 1) * 2.0;
+      const numArms = 4;
+      const armValue = (Math.cos(spiralAngle * numArms) + 1) / 2;
+      const armI = Math.pow(armValue, 2.5);
+
+      // Bright outer rim (accretion ring)
+      const rimDist = Math.abs(dist - outerRadius);
+      const rimWidth = 1.5;
+      const rimI = rimDist < rimWidth ? (1 - rimDist / rimWidth) * 0.5 : 0;
+
+      // Radial: brighter toward outer edge (material swirling in)
+      const radialFade = 0.3 + 0.7 * (dist / Math.max(outerRadius, 1));
+      return Math.min(1, (armI * 0.6 * radialFade + rimI) * fade);
+    },
+    hueShift: (dist, age) => -dist * 10 + age * 8,
+  },
+
+  // 11. Plasma — organic flowing blob from overlapping sine fields
+  {
+    name: "Plasma",
+    maxAge: 45,
+    maxRadius: 16,
+    intensity: (dx, dy, dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const radius = Math.min(progress * 3, 1) * maxRadius;
+      if (dist > radius) return 0;
+      const fade = 1 - Math.pow(progress, 0.5);
+      const t = age * 0.15;
+
+      // 3 overlapping sine fields create organic plasma shapes
+      const f1 = Math.sin(dx * 0.8 + t) + Math.sin(dy * 0.6 - t * 0.7);
+      const f2 = Math.sin(dist * 0.9 - t * 1.3) + Math.sin((dx + dy) * 0.5 + t * 0.8);
+      const f3 = Math.sin(dx * 0.3 - dy * 0.7 + t * 0.5) + Math.sin(dist * 0.4 + t);
+
+      // Combine fields: range [-6, 6] → normalize to [0, 1]
+      const combined = (f1 + f2 + f3 + 6) / 12;
+      // Sharpen into blob shapes
+      const shaped = Math.pow(combined, 1.5);
+
+      const distFade = 1 - Math.pow(dist / radius, 2);
+      return shaped * fade * Math.max(distFade, 0);
+    },
+    hueShift: (dist, age) => dist * 10 + age * 15,
+  },
+
+  // 12. Shockwave — thick double-ring with chromatic trail
+  {
+    name: "Shockwave",
+    maxAge: 35,
+    maxRadius: 22,
+    intensity: (_dx, _dy, dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const fade = 1 - Math.pow(progress, 0.4);
+
+      // Bright center flash (first few frames)
+      let centerFlash = 0;
+      if (age < 4 && dist < 2) {
+        centerFlash = (1 - dist / 2) * (1 - age / 4) * 0.8;
+      }
+
+      // Primary ring — thick expanding ring
+      const primaryRadius = progress * maxRadius;
+      const primaryWidth = 2.5 + progress * 2.5; // very thick
+      const primaryRingDist = Math.abs(dist - primaryRadius);
+      let primaryI = 0;
+      if (primaryRingDist < primaryWidth) {
+        const edge = 1 - primaryRingDist / primaryWidth;
+        // Bright leading edge (outer), softer inner trail
+        const isOuter = dist > primaryRadius;
+        if (isOuter) {
+          primaryI = Math.pow(edge, 1.5) * 1.0;
+        } else {
+          primaryI = Math.pow(edge, 0.8) * 0.5; // slow-fading inner trail
+        }
+        primaryI *= fade;
+      }
+
+      // Secondary ring — fainter, follows with delay
+      const secDelay = 4;
+      const secAge = age - secDelay;
+      let secI = 0;
+      if (secAge > 0) {
+        const secProgress = secAge / (maxAge - secDelay);
+        if (secProgress <= 1) {
+          const secRadius = secProgress * maxRadius * 0.85;
+          const secWidth = 1.5 + secProgress * 1.5;
+          const secRingDist = Math.abs(dist - secRadius);
+          if (secRingDist < secWidth) {
+            secI = (1 - secRingDist / secWidth) * fade * 0.4;
+          }
+        }
+      }
+
+      return Math.min(1, Math.max(centerFlash, primaryI + secI));
+    },
+    hueShift: (dist, age) => dist * 12 + age * 8,
+  },
+
+  // 13. Butterfly — fluttering wings dispersing outward
+  {
+    name: "Butterfly",
+    maxAge: 60,
+    maxRadius: 20,
+    intensity: (dx, dy, dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const fade = 1 - Math.pow(progress, 0.4);
+      let maxI = 0;
+
+      for (let i = 0; i < 6; i++) {
+        // Each butterfly drifts in a unique direction
+        const driftAngle = i * 2.399 + 0.7;
+        const wobble = 0.4 * Math.sin(age * 0.2 + i * 1.5); // lateral wobble
+        const driftSpeed = 0.3 + (i % 3) * 0.1;
+        const drift = age * driftSpeed * (1 - progress * 0.2);
+        const bx = Math.cos(driftAngle + wobble) * drift;
+        const by = Math.sin(driftAngle + wobble) * drift - drift * 0.05; // slight upward bias
+        const bdx = dx - bx;
+        const bdy = dy - by;
+        const bDist = Math.sqrt(bdx * bdx + bdy * bdy);
+
+        // Wing size varies per butterfly
+        const wingSpan = 1.2 + (i % 3) * 0.6;
+        const bodyLen = wingSpan * 0.6;
+
+        // Flutter: wings beat sinusoidally
+        const flutter = Math.abs(Math.sin(age * 0.35 + i * 2.1));
+        const wingWidth = wingSpan * (0.3 + 0.7 * flutter);
+
+        // Body is a thin vertical line
+        if (Math.abs(bdx) < 0.5 && Math.abs(bdy) < bodyLen) {
+          const bodyI = (1 - Math.abs(bdy) / bodyLen) * 0.8 * fade;
+          maxI = Math.max(maxI, bodyI);
+          continue;
+        }
+
+        // Wings: two lobes (upper-left / upper-right or rotated)
+        const wingAngle = driftAngle + Math.PI / 2; // perpendicular to drift
+        const cosA = Math.cos(wingAngle);
+        const sinA = Math.sin(wingAngle);
+        // Rotate into butterfly-local space
+        const lx = bdx * cosA + bdy * sinA; // along wingspan
+        const ly = -bdx * sinA + bdy * cosA; // along body
+
+        const absLx = Math.abs(lx);
+        if (absLx > wingWidth || absLx < 0.2) continue;
+        if (Math.abs(ly) > bodyLen * 0.8) continue;
+
+        // Wing shape: rounded triangular lobe
+        const wingRatio = absLx / wingWidth;
+        const maxLy = bodyLen * 0.7 * (1 - wingRatio * 0.6);
+        if (Math.abs(ly) > maxLy) continue;
+
+        const edgeFade = 1 - wingRatio;
+        const heightFade = 1 - Math.abs(ly) / maxLy;
+        const wingI = edgeFade * heightFade * flutter * 0.9 * fade;
+        maxI = Math.max(maxI, wingI);
+      }
+      return maxI;
+    },
+    hueShift: (dist, age) => dist * 25 + age * 10,
   },
 ];
 

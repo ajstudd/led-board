@@ -6,7 +6,7 @@
  *
  * Architecture:
  * - Offscreen WebGL canvas sized to grid dimensions (cols × rows)
- * - Fullscreen-quad fragment shader with all 8 preset intensity functions
+ * - Fullscreen-quad fragment shader with all 12 preset intensity functions
  * - Batched rendering: up to 16 effects per draw call, additive blending
  * - readPixels() outputs directly into the overlay Uint8ClampedArray
  *
@@ -86,43 +86,53 @@ float intensityRipple(float dx, float dy, float dist, float age, float maxAge, f
   return (1.0 - ringDist / ringWidth) * fade;
 }
 
-// ── Preset 1: Wave ──────────────────────────────────────────
+// ── Preset 1: Wave — S-shaped water wave spreading horizontally ─
 float intensityWave(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
-  float progress = age / maxAge;
-  float currentSpread = progress * maxRadius;
-  float absDx = abs(dx);
-  float absDy = abs(dy);
-  if (absDx > currentSpread) return 0.0;
-  float waveHeight = 1.5 + progress * 1.0;
-  if (absDy > waveHeight) return 0.0;
-  float frontDist = abs(absDx - currentSpread);
-  if (frontDist > 3.0) return 0.0;
-  float fade = 1.0 - pow(progress, 0.6);
-  float yFade = 1.0 - absDy / waveHeight;
-  float frontFade = 1.0 - frontDist / 3.0;
-  float wave = (sin(absDx * 0.8 - age * 0.4) + 1.0) / 2.0;
-  return frontFade * yFade * fade * (0.4 + 0.6 * wave);
-}
-
-// ── Preset 2: Raindrop ──────────────────────────────────────
-float intensityRaindrop(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
   float progress = age / maxAge;
   float fade = 1.0 - pow(progress, 0.5);
   float mx = 0.0;
-  for (int ring = 0; ring < 3; ring++) {
-    float delay = float(ring) * 4.0;
+  for (int w = 0; w < 3; w++) {
+    float delay = float(w) * 5.0;
     float effAge = age - delay;
     if (effAge < 0.0) continue;
-    float rp = effAge / (maxAge - delay);
-    if (rp > 1.0) continue;
-    float cr = rp * maxRadius * (1.0 - float(ring) * 0.15);
-    float rw = 0.8 + rp * 0.8;
-    float rd = abs(dist - cr);
-    if (rd > rw) continue;
-    float rf = 1.0 - float(ring) * 0.25;
-    mx = max(mx, (1.0 - rd / rw) * fade * rf);
+    float wp = effAge / (maxAge - delay);
+    if (wp > 1.0) continue;
+    float spread = wp * maxRadius;
+    float absDx = abs(dx);
+    if (absDx > spread + 1.0) continue;
+    float amplitude = 1.5 + wp * 2.5;
+    float waveY = amplitude * sin(dx * 0.6 - effAge * 0.25);
+    float dfc = abs(dy - waveY);
+    float thickness = 1.2 + wp * 0.8 - float(w) * 0.2;
+    if (dfc > thickness) continue;
+    float tipFade = absDx > spread - 2.0 ? 1.0 - (absDx - spread + 2.0) / 3.0 : 1.0;
+    float ef = 1.0 - dfc / thickness;
+    float wf = 1.0 - float(w) * 0.3;
+    mx = max(mx, ef * fade * wf * max(tipFade, 0.0));
   }
   return mx;
+}
+
+// ── Preset 2: Raindrop — splash + filled disk with ripple texture ─
+float intensityRaindrop(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float fade = 1.0 - pow(progress, 0.5);
+  float splashI = 0.0;
+  if (progress < 0.3) {
+    float sp = progress / 0.3;
+    float splashR = 1.5 + sp * 1.0;
+    if (dist < splashR) {
+      splashI = (1.0 - dist / splashR) * (1.0 - sp * 0.5);
+    }
+  }
+  float diskRadius = min(progress * 2.5, 1.0) * maxRadius;
+  if (dist > diskRadius) return splashI * fade;
+  float edgeDist = abs(dist - diskRadius);
+  float edgeBright = edgeDist < 1.5 ? (1.0 - edgeDist / 1.5) * 0.7 : 0.0;
+  float innerRatio = dist / max(diskRadius, 0.01);
+  float ripple = (sin(dist * 2.5 - age * 0.5) + 1.0) / 2.0;
+  float interiorI = (1.0 - innerRatio * 0.6) * 0.25 * (0.4 + 0.6 * ripple);
+  return max(splashI, edgeBright + interiorI) * fade;
 }
 
 // ── Preset 3: Star Burst ────────────────────────────────────
@@ -177,83 +187,287 @@ float intensitySparkle(float dx, float dy, float dist, float age, float maxAge, 
   return twinkle * fade * (1.0 - (dist / currentRadius) * 0.5);
 }
 
-// ── Preset 6: Laser ─────────────────────────────────────────
+// ── Preset 6: Laser — rotating beams with glow halos ────────
 float intensityLaser(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
   if (dist < 0.5) return 1.0 - age / maxAge;
   float progress = age / maxAge;
-  float beamLength = progress * maxRadius;
+  float beamLength = min(progress * 2.0, 1.0) * maxRadius;
   if (dist > beamLength) return 0.0;
   float angle = atan(dy, dx);
+  float rotation = age * 0.008;
   float mx = 0.0;
-  for (int i = 0; i < 5; i++) {
-    float ba = -PI + mod(float(i) * 2.399, TAU);
+  for (int i = 0; i < 7; i++) {
+    float baseAngle = -PI + mod(float(i) * 2.399, TAU);
+    float ba = baseAngle + rotation;
     float ad = abs(angle - ba);
     if (ad > PI) ad = TAU - ad;
-    float bw = 0.12 + dist * 0.008;
-    if (ad > bw) continue;
-    float cf = 1.0 - ad / bw;
-    float core = cf * cf * cf;
-    float tipDist = abs(dist - beamLength);
-    float tipGlow = tipDist < 2.0 ? 1.0 - tipDist / 2.0 : 0.0;
-    float bodyGlow = 0.3 + 0.7 * (1.0 - dist / beamLength);
-    float flicker = 0.8 + 0.2 * sin(dist * 3.5 - age * 2.0 + float(i) * 1.7);
-    float fade = 1.0 - pow(progress, 0.5);
-    mx = max(mx, core * (bodyGlow + tipGlow * 0.7) * fade * flicker);
+    float thisLen = beamLength * (0.7 + mod(float(i), 3.0) * 0.15);
+    if (dist > thisLen) continue;
+    float bw = 0.16 + dist * 0.01;
+    float hw = bw * 3.5;
+    float inten = 0.0;
+    if (ad < bw) {
+      float cf = 1.0 - ad / bw;
+      inten = cf * cf;
+    } else if (ad < hw) {
+      float hf = 1.0 - (ad - bw) / (hw - bw);
+      inten = hf * hf * hf * 0.35;
+    }
+    if (inten <= 0.0) continue;
+    float tipDist = abs(dist - thisLen);
+    float tipGlow = tipDist < 3.0 ? (1.0 - tipDist / 3.0) * 0.8 : 0.0;
+    float bodyGlow = 0.25 + 0.75 * (1.0 - dist / thisLen);
+    float flicker = 0.85 + 0.15 * sin(dist * 3.0 - age * 1.8 + float(i) * 2.3);
+    float fade = 1.0 - pow(progress, 0.6);
+    mx = max(mx, inten * (bodyGlow + tipGlow) * fade * flicker);
   }
   return mx;
 }
 
-// ── Preset 7: Bubble ────────────────────────────────────────
+// ── Preset 7: Bubble — iridescent, wobbling, smooth pop ─────
 float intensityBubble(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
   float progress = age / maxAge;
-  float fade = 1.0 - pow(progress, 0.4);
+  float fade = 1.0 - pow(progress, 0.35);
   float mx = 0.0;
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < 8; i++) {
     float bAngle = float(i) * 2.399 + 0.5;
-    float bCos = cos(bAngle);
-    float bSin = sin(bAngle);
-    float driftSpeed = 0.6 + mod(float(i), 3.0) * 0.15;
-    float drift = age * driftSpeed * (1.0 - progress * 0.3);
+    float wobbleAngle = bAngle + 0.3 * sin(age * 0.15 + float(i) * 1.8);
+    float bCos = cos(wobbleAngle);
+    float bSin = sin(wobbleAngle);
+    float driftSpeed = 0.5 + mod(float(i), 4.0) * 0.12;
+    float drift = age * driftSpeed * (1.0 - progress * 0.25);
     float bx = bCos * drift;
     float by = bSin * drift;
     float bdx = dx - bx;
     float bdy = dy - by;
     float bDist = sqrt(bdx * bdx + bdy * bdy);
     float growPhase = min(progress * 3.0, 1.0);
-    float popPhase = progress > 0.75 ? (progress - 0.75) / 0.25 : 0.0;
-    float bubbleR = (1.2 + float(i) * 0.2) * growPhase * (1.0 - popPhase * 0.6);
-    if (bubbleR < 0.3) continue;
-    float rw = 0.45 + bubbleR * 0.15;
+    float popPhase = progress > 0.8 ? (progress - 0.8) / 0.2 : 0.0;
+    float sizeVar = 1.0 + float(i) * 0.25;
+    float bubbleR = sizeVar * growPhase * (1.0 + popPhase * 0.5);
+    float popFade = 1.0 - pow(popPhase, 0.5);
+    if (bubbleR < 0.3 || popFade < 0.01) continue;
+    float rw = 0.5 + bubbleR * 0.18;
     float rd = abs(bDist - bubbleR);
     if (bDist > bubbleR + rw) continue;
     float inten;
     if (rd < rw) {
-      inten = (1.0 - rd / rw) * 0.9;
+      inten = (1.0 - rd / rw) * 0.95;
     } else {
-      inten = (1.0 - bDist / bubbleR) * 0.25;
+      float innerRatio = bDist / bubbleR;
+      float iridWave = (sin(innerRatio * 8.0 + age * 0.3 + float(i) * 2.0) + 1.0) / 2.0;
+      inten = (1.0 - innerRatio) * 0.3 * (0.5 + 0.5 * iridWave);
     }
-    float specX = bdx + bubbleR * 0.35;
-    float specY = bdy + bubbleR * 0.35;
-    float specDist = sqrt(specX * specX + specY * specY);
-    if (specDist < bubbleR * 0.35) {
-      inten += (1.0 - specDist / (bubbleR * 0.35)) * 0.6;
+    float spec1X = bdx + bubbleR * 0.3;
+    float spec1Y = bdy + bubbleR * 0.3;
+    float spec1D = sqrt(spec1X * spec1X + spec1Y * spec1Y);
+    float specR = bubbleR * 0.3;
+    if (spec1D < specR) inten += (1.0 - spec1D / specR) * 0.7;
+    float spec2X = bdx - bubbleR * 0.2;
+    float spec2Y = bdy - bubbleR * 0.25;
+    float spec2D = sqrt(spec2X * spec2X + spec2Y * spec2Y);
+    if (spec2D < specR * 0.7) inten += (1.0 - spec2D / (specR * 0.7)) * 0.3;
+    float wobble = 0.85 + 0.15 * sin(age * 0.4 + float(i) * 2.1 + bDist * 1.0);
+    mx = max(mx, min(1.0, inten * fade * popFade * wobble));
+  }
+  return mx;
+}
+
+// ── Preset 8: Firework — rocket trail → huge explosion pop ──
+float intensityFirework(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float launchEnd = 0.12;
+  float travelDist = maxRadius * 0.8;
+  // Phase 1: rocket going up
+  if (progress < launchEnd) {
+    float lp = progress / launchEnd;
+    float headY = -lp * travelDist;
+    float hdx = dx;
+    float hdy = dy - headY;
+    float hDist = sqrt(hdx * hdx + hdy * hdy);
+    if (hDist < 3.0) return 1.0 - hDist / 3.0;
+    float trailLen = lp * travelDist * 0.8;
+    if (abs(hdx) < 2.0 && hdy > 0.0 && hdy < trailLen) {
+      float fd = 1.0 - hdy / trailLen;
+      float wd = 1.0 - abs(hdx) / 2.0;
+      float fl = 0.5 + 0.5 * sin(hdy * 5.0 + age * 4.0);
+      return fd * wd * fl * 0.65;
     }
-    float wobble = 0.85 + 0.15 * sin(age * 0.5 + float(i) * 2.1 + bDist * 1.2);
-    mx = max(mx, min(1.0, inten * fade * wobble * (1.0 - popPhase * 0.5)));
+    return 0.0;
+  }
+  // Phase 2: explosion
+  float ep = (progress - launchEnd) / (1.0 - launchEnd);
+  float fade = 1.0 - pow(ep, 0.3);
+  float peakY = -travelDist;
+  float cdy = dy - peakY;
+  float cDist = sqrt(dx * dx + cdy * cdy);
+  float mx = 0.0;
+  // Big bright flash
+  if (ep < 0.25) {
+    float flashR = 5.0 + ep * 15.0;
+    if (cDist < flashR) {
+      mx = (1.0 - cDist / flashR) * (1.0 - ep / 0.25);
+    }
+  }
+  // 12 large sparks with gravity arcs and streak trails
+  for (int i = 0; i < 12; i++) {
+    float angle = float(i) * TAU / 12.0 + 0.2;
+    float speed = 0.7 + mod(float(i), 3.0) * 0.2;
+    float t = ep * maxRadius * 0.6;
+    float sx = cos(angle) * speed * t;
+    float sy = sin(angle) * speed * t + t * t * 0.25;
+    float sdx = dx - sx;
+    float sdy = cdy - sy;
+    float sDist = sqrt(sdx * sdx + sdy * sdy);
+    if (sDist < 4.0) mx = max(mx, (1.0 - sDist / 4.0) * fade);
+    else if (sDist < 8.0) mx = max(mx, (1.0 - sDist / 8.0) * fade * 0.3);
+    // Streak trail (4 past positions)
+    for (int s = 1; s <= 4; s++) {
+      float pastEp = max(0.0, ep - float(s) * 0.04);
+      float pt = pastEp * maxRadius * 0.6;
+      float px = cos(angle) * speed * pt;
+      float py = sin(angle) * speed * pt + pt * pt * 0.25;
+      float pdx = dx - px;
+      float pdy = cdy - py;
+      float pDist = sqrt(pdx * pdx + pdy * pdy);
+      if (pDist < 2.5) mx = max(mx, (1.0 - pDist / 2.5) * fade * (0.5 - float(s) * 0.1));
+    }
+  }
+  return mx;
+}
+
+// ── Preset 9: Vortex — inward whirlpool with bright rim ──────
+float intensityVortex(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float outerRadius = maxRadius * min(progress * 2.0, 1.0);
+  if (dist > outerRadius + 1.0) return 0.0;
+  float fade = 1.0 - pow(progress, 0.5);
+  if (dist < 1.5) {
+    float coreGrow = min(progress / 0.3, 1.0);
+    float pulse = 0.7 + 0.3 * sin(age * 0.5);
+    return (1.0 - dist / 1.5) * fade * coreGrow * pulse;
+  }
+  float angle = atan(dy, dx);
+  float rotation = -age * 0.3;
+  float spiralAngle = angle + rotation + log(dist + 1.0) * 2.0;
+  float armVal = (cos(spiralAngle * 4.0) + 1.0) / 2.0;
+  float armI = pow(armVal, 2.5);
+  float rimDist = abs(dist - outerRadius);
+  float rimI = rimDist < 1.5 ? (1.0 - rimDist / 1.5) * 0.5 : 0.0;
+  float radialFade = 0.3 + 0.7 * (dist / max(outerRadius, 1.0));
+  return min(1.0, (armI * 0.6 * radialFade + rimI) * fade);
+}
+
+// ── Preset 10: Plasma — overlapping sine fields ─────────────
+float intensityPlasma(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float radius = min(progress * 3.0, 1.0) * maxRadius;
+  if (dist > radius) return 0.0;
+  float fade = 1.0 - pow(progress, 0.5);
+  float t = age * 0.15;
+  float f1 = sin(dx * 0.8 + t) + sin(dy * 0.6 - t * 0.7);
+  float f2 = sin(dist * 0.9 - t * 1.3) + sin((dx + dy) * 0.5 + t * 0.8);
+  float f3 = sin(dx * 0.3 - dy * 0.7 + t * 0.5) + sin(dist * 0.4 + t);
+  float combined = (f1 + f2 + f3 + 6.0) / 12.0;
+  float shaped = pow(combined, 1.5);
+  float df = 1.0 - pow(dist / radius, 2.0);
+  return shaped * fade * max(df, 0.0);
+}
+
+// ── Preset 11: Shockwave — thick double-ring ────────────────
+float intensityShockwave(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float fade = 1.0 - pow(progress, 0.4);
+  float centerFlash = 0.0;
+  if (age < 4.0 && dist < 2.0) {
+    centerFlash = (1.0 - dist / 2.0) * (1.0 - age / 4.0) * 0.8;
+  }
+  float primaryRadius = progress * maxRadius;
+  float pw = 2.5 + progress * 2.5;
+  float prd = abs(dist - primaryRadius);
+  float primaryI = 0.0;
+  if (prd < pw) {
+    float edge = 1.0 - prd / pw;
+    if (dist > primaryRadius) {
+      primaryI = pow(edge, 1.5);
+    } else {
+      primaryI = pow(edge, 0.8) * 0.5;
+    }
+    primaryI *= fade;
+  }
+  float secI = 0.0;
+  float secAge = age - 4.0;
+  if (secAge > 0.0) {
+    float sp = secAge / (maxAge - 4.0);
+    if (sp <= 1.0) {
+      float sr = sp * maxRadius * 0.85;
+      float sw = 1.5 + sp * 1.5;
+      float srd = abs(dist - sr);
+      if (srd < sw) {
+        secI = (1.0 - srd / sw) * fade * 0.4;
+      }
+    }
+  }
+  return min(1.0, max(centerFlash, primaryI + secI));
+}
+
+// ── Preset 12: Butterfly — fluttering wings dispersing ─────
+float intensityButterfly(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float fade = 1.0 - pow(progress, 0.4);
+  float mx = 0.0;
+  for (int i = 0; i < 6; i++) {
+    float driftAngle = float(i) * 2.399 + 0.7;
+    float wobble = 0.4 * sin(age * 0.2 + float(i) * 1.5);
+    float driftSpeed = 0.3 + mod(float(i), 3.0) * 0.1;
+    float drift = age * driftSpeed * (1.0 - progress * 0.2);
+    float bx = cos(driftAngle + wobble) * drift;
+    float by = sin(driftAngle + wobble) * drift - drift * 0.05;
+    float bdx = dx - bx;
+    float bdy = dy - by;
+    float wingSpan = 1.2 + mod(float(i), 3.0) * 0.6;
+    float bodyLen = wingSpan * 0.6;
+    float flutter = abs(sin(age * 0.35 + float(i) * 2.1));
+    float wingWidth = wingSpan * (0.3 + 0.7 * flutter);
+    // Body
+    if (abs(bdx) < 0.5 && abs(bdy) < bodyLen) {
+      mx = max(mx, (1.0 - abs(bdy) / bodyLen) * 0.8 * fade);
+      continue;
+    }
+    // Wings in local space
+    float wa = driftAngle + PI / 2.0;
+    float ca = cos(wa);
+    float sa = sin(wa);
+    float lx = bdx * ca + bdy * sa;
+    float ly = -bdx * sa + bdy * ca;
+    float alx = abs(lx);
+    if (alx > wingWidth || alx < 0.2) continue;
+    if (abs(ly) > bodyLen * 0.8) continue;
+    float wr = alx / wingWidth;
+    float mly = bodyLen * 0.7 * (1.0 - wr * 0.6);
+    if (abs(ly) > mly) continue;
+    float ef = 1.0 - wr;
+    float hf = 1.0 - abs(ly) / mly;
+    mx = max(mx, ef * hf * flutter * 0.9 * fade);
   }
   return mx;
 }
 
 // ── Compute hue-shift value per preset ──────────────────────
-// Returns (hasShift, shiftAmount)
 vec2 hueShiftForPreset(int preset, float dist, float age) {
   if (preset == 0) return vec2(1.0, dist * 8.0);
+  if (preset == 1) return vec2(1.0, dist * 6.0 + age * 4.0);
   if (preset == 2) return vec2(1.0, age * 5.0);
   if (preset == 3) return vec2(1.0, dist * 15.0);
   if (preset == 4) return vec2(1.0, dist * 12.0 + age * 8.0);
   if (preset == 5) return vec2(1.0, age * 12.0);
-  if (preset == 6) return vec2(1.0, dist * 20.0 + age * 10.0);
-  if (preset == 7) return vec2(1.0, dist * 25.0 + age * 6.0);
+  if (preset == 6) return vec2(1.0, dist * 18.0 + age * 8.0);
+  if (preset == 7) return vec2(1.0, dist * 30.0 + age * 5.0);
+  if (preset == 8) return vec2(1.0, dist * 20.0 + age * 12.0);
+  if (preset == 9) return vec2(1.0, -dist * 10.0 + age * 8.0);
+  if (preset == 10) return vec2(1.0, dist * 10.0 + age * 15.0);
+  if (preset == 11) return vec2(1.0, dist * 12.0 + age * 8.0);
+  if (preset == 12) return vec2(1.0, dist * 25.0 + age * 10.0);
   return vec2(0.0, 0.0);
 }
 
@@ -267,6 +481,11 @@ float computeIntensity(int preset, float dx, float dy, float dist, float age, fl
   if (preset == 5) return intensitySparkle(dx, dy, dist, age, maxAge, maxRadius);
   if (preset == 6) return intensityLaser(dx, dy, dist, age, maxAge, maxRadius);
   if (preset == 7) return intensityBubble(dx, dy, dist, age, maxAge, maxRadius);
+  if (preset == 8) return intensityFirework(dx, dy, dist, age, maxAge, maxRadius);
+  if (preset == 9) return intensityVortex(dx, dy, dist, age, maxAge, maxRadius);
+  if (preset == 10) return intensityPlasma(dx, dy, dist, age, maxAge, maxRadius);
+  if (preset == 11) return intensityShockwave(dx, dy, dist, age, maxAge, maxRadius);
+  if (preset == 12) return intensityButterfly(dx, dy, dist, age, maxAge, maxRadius);
   return 0.0;
 }
 
