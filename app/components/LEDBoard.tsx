@@ -9,7 +9,7 @@ import { renderTextCentered, renderTextToWideBuffer, measureText } from "../lib/
 import { AnimationManager, AnimationState } from "../lib/animation";
 import { ANIMATIONS, MARQUEE_ANIMATION, captureSnapshot, updateSnapshotPixel, setMarqueeBuffer } from "../lib/animations";
 import { strokeRecorder } from "../lib/recorder";
-import { uint8ToBase64, base64ToUint8 } from "../lib/utils";
+import { uint8ToBase64, base64ToUint8, hslToRgb } from "../lib/utils";
 import { EffectsEngine, EffectPreset, EFFECT_PRESETS, EffectsOverlay } from "../lib/effects";
 import { SessionRecorder, RecordingState, sessionRecorder } from "../lib/sessionRecorder";
 import GestureController, { GestureLoadState } from "./GestureController";
@@ -660,6 +660,14 @@ export default function LEDBoard() {
 
             const snap = snapshotRef.current;
 
+            const isMulti = activeColor[0] === -1;
+            let drawColor: RGB = activeColor;
+            if (isMulti) {
+                // Smooth hue over time: completes a full 360 loop every 3.6 seconds
+                const hue = (performance.now() / 10) % 360;
+                drawColor = hslToRgb(hue, 100, 50);
+            }
+
             if (snap) {
                 // Animation active — update the content buffer so changes
                 // are reflected in the running (or paused) animation.
@@ -667,11 +675,11 @@ export default function LEDBoard() {
 
                 switch (activeTool) {
                     case "draw":
-                        snap[idx] = activeColor[0];
-                        snap[idx + 1] = activeColor[1];
-                        snap[idx + 2] = activeColor[2];
-                        updateSnapshotPixel(idx, activeColor[0], activeColor[1], activeColor[2]);
-                        strokeRecorder.record(col, row, activeColor[0], activeColor[1], activeColor[2]);
+                        snap[idx] = drawColor[0];
+                        snap[idx + 1] = drawColor[1];
+                        snap[idx + 2] = drawColor[2];
+                        updateSnapshotPixel(idx, drawColor[0], drawColor[1], drawColor[2]);
+                        strokeRecorder.record(col, row, drawColor[0], drawColor[1], drawColor[2]);
                         effectsRef.current?.trigger(col, row, activeColor);
                         break;
                     case "erase":
@@ -696,7 +704,7 @@ export default function LEDBoard() {
                         // Temporarily load content, flood-fill, save back
                         const before = new Uint8ClampedArray(snap);
                         grid.loadData(snap);
-                        grid.floodFill(col, row, activeColor);
+                        grid.floodFill(col, row, drawColor);
                         snapshotRef.current = grid.cloneData();
                         captureSnapshot(snapshotRef.current);
                         strokeRecorder.recordBulk(before, snapshotRef.current, grid.cols);
@@ -717,8 +725,8 @@ export default function LEDBoard() {
                 // Normal mode — no animation active
                 switch (activeTool) {
                     case "draw":
-                        grid.setCell(col, row, activeColor);
-                        strokeRecorder.record(col, row, activeColor[0], activeColor[1], activeColor[2]);
+                        grid.setCell(col, row, drawColor);
+                        strokeRecorder.record(col, row, drawColor[0], drawColor[1], drawColor[2]);
                         effectsRef.current?.trigger(col, row, activeColor);
                         break;
                     case "erase":
@@ -733,7 +741,7 @@ export default function LEDBoard() {
                         break;
                     case "fill": {
                         const before = grid.cloneData();
-                        grid.floodFill(col, row, activeColor);
+                        grid.floodFill(col, row, drawColor);
                         strokeRecorder.recordBulk(before, grid.data, grid.cols);
                         break;
                     }

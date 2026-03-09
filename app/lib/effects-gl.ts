@@ -24,6 +24,7 @@ export interface GLEffectInput {
   readonly color: readonly [number, number, number];
   readonly hsl: readonly [number, number, number];
   readonly presetIndex: number;
+  readonly isMulti: boolean;
 }
 
 // ── Shader source code ────────────────────────────────────────
@@ -44,7 +45,7 @@ uniform vec2 u_gridSize;
 uniform int u_numEffects;
 uniform vec2 u_pos[${MAX_BATCH}];
 uniform vec4 u_params[${MAX_BATCH}];
-uniform vec3 u_color[${MAX_BATCH}];
+uniform vec4 u_color[${MAX_BATCH}];
 uniform vec3 u_hsl[${MAX_BATCH}];
 
 // ── HSL → RGB (port of utils.ts hslToRgb) ──────────────────
@@ -243,8 +244,8 @@ float intensityBubble(float dx, float dy, float dist, float age, float maxAge, f
     float bDist = sqrt(bdx * bdx + bdy * bdy);
     float growPhase = min(progress * 3.0, 1.0);
     float popPhase = progress > 0.8 ? (progress - 0.8) / 0.2 : 0.0;
-    float sizeVar = 1.0 + float(i) * 0.25;
-    float bubbleR = sizeVar * growPhase * (1.0 + popPhase * 0.5);
+    float sizeVar = 1.0 + float(i) * 0.6;
+    float bubbleR = sizeVar * growPhase * (1.0 + popPhase * 0.5) * 1.5;
     float popFade = 1.0 - pow(popPhase, 0.5);
     if (bubbleR < 0.3 || popFade < 0.01) continue;
     float rw = 0.5 + bubbleR * 0.18;
@@ -276,7 +277,7 @@ float intensityBubble(float dx, float dy, float dist, float age, float maxAge, f
 // ── Preset 8: Firework — rocket trail → huge explosion pop ──
 float intensityFirework(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
   float progress = age / maxAge;
-  float launchEnd = 0.12;
+  float launchEnd = 0.06;
   float travelDist = maxRadius * 0.8;
   // Phase 1: rocket going up
   if (progress < launchEnd) {
@@ -520,13 +521,14 @@ void main() {
     // Colour (with optional hue shift)
     vec3 rgb;
     vec2 hs = hueShiftForPreset(preset, dist, age);
-    if (hs.x > 0.5) {
+    bool isMulti = u_color[i].a > 0.5;
+    if (isMulti && hs.x > 0.5) {
       float h = u_hsl[i].x;
       float s = u_hsl[i].y;
       float l = u_hsl[i].z;
       rgb = hslToRgb(mod(h + hs.y, 360.0), s, l);
     } else {
-      rgb = u_color[i];
+      rgb = u_color[i].rgb;
     }
 
     total += vec4(rgb * inten, inten);
@@ -675,11 +677,12 @@ export class GLEffectsRenderer {
           e.effectiveMaxRadius,
           e.presetIndex,
         );
-        gl.uniform3f(
+        gl.uniform4f(
           this.uColor[i],
           e.color[0] / 255,
           e.color[1] / 255,
           e.color[2] / 255,
+          e.isMulti ? 1.0 : 0.0,
         );
         gl.uniform3f(
           this.uHsl[i],

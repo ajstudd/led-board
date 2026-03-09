@@ -30,6 +30,8 @@ const PALETTE: RGB[] = [
     [64, 64, 64],
     [32, 32, 32],
     [0, 0, 0],
+    // Multicolor
+    [-1, -1, -1],
 ];
 
 interface ColorPickerProps {
@@ -42,7 +44,7 @@ export default function ColorPicker({
     onColorChange,
 }: ColorPickerProps) {
     const [hexInput, setHexInput] = useState(
-        rgbToHex(activeColor[0], activeColor[1], activeColor[2]),
+        activeColor[0] === -1 ? "Multi" : rgbToHex(activeColor[0], activeColor[1], activeColor[2]),
     );
 
     const handleHexChange = useCallback(
@@ -70,7 +72,7 @@ export default function ColorPicker({
     const handleSwatchClick = useCallback(
         (color: RGB) => {
             onColorChange(color);
-            setHexInput(rgbToHex(color[0], color[1], color[2]));
+            setHexInput(color[0] === -1 ? "Multi" : rgbToHex(color[0], color[1], color[2]));
         },
         [onColorChange],
     );
@@ -83,12 +85,14 @@ export default function ColorPicker({
                     <div
                         className="h-7 w-7 sm:h-8 sm:w-8 rounded border border-white/20 cursor-pointer"
                         style={{
-                            backgroundColor: `rgb(${activeColor[0]},${activeColor[1]},${activeColor[2]})`,
+                            background: activeColor[0] === -1
+                                ? "linear-gradient(45deg, red, orange, yellow, green, blue, indigo, violet)"
+                                : `rgb(${activeColor[0]},${activeColor[1]},${activeColor[2]})`,
                         }}
                     />
                     <input
                         type="color"
-                        value={rgbToHex(activeColor[0], activeColor[1], activeColor[2])}
+                        value={activeColor[0] === -1 ? "#ffffff" : rgbToHex(activeColor[0], activeColor[1], activeColor[2])}
                         onChange={handleNativeColorChange}
                         className="absolute inset-0 h-7 w-7 sm:h-8 sm:w-8 cursor-pointer opacity-0"
                         title="Pick a colour"
@@ -112,9 +116,11 @@ export default function ColorPicker({
                         onClick={() => handleSwatchClick(color)}
                         className="aspect-square w-full max-w-6 rounded-sm border border-white/10 hover:scale-110 transition-transform"
                         style={{
-                            backgroundColor: `rgb(${color[0]},${color[1]},${color[2]})`,
+                            background: color[0] === -1
+                                ? "linear-gradient(45deg, red, orange, yellow, green, blue, indigo, violet)"
+                                : `rgb(${color[0]},${color[1]},${color[2]})`,
                         }}
-                        title={rgbToHex(color[0], color[1], color[2])}
+                        title={color[0] === -1 ? "Multicolor" : rgbToHex(color[0], color[1], color[2])}
                     />
                 ))}
             </div>

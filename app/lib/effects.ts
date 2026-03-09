@@ -283,8 +283,9 @@ export const EFFECT_PRESETS: EffectPreset[] = [
         const growPhase = Math.min(progress * 3, 1);
         const popStart = 0.8;
         const popPhase = progress > popStart ? (progress - popStart) / (1 - popStart) : 0;
-        const sizeVar = 1.0 + i * 0.25;
-        const bubbleRadius = sizeVar * growPhase * (1 + popPhase * 0.5); // expands on pop
+        // INCREASE BUBBLE SIZES AND VARIANCE
+        const sizeVar = 1.0 + i * 0.6; 
+        const bubbleRadius = sizeVar * growPhase * (1 + popPhase * 0.5) * 1.5; // expands on pop and generally larger
         const popFade = 1 - Math.pow(popPhase, 0.5); // fades out smoothly
         if (bubbleRadius < 0.3 || popFade < 0.01) continue;
 
@@ -335,7 +336,7 @@ export const EFFECT_PRESETS: EffectPreset[] = [
     maxRadius: 30,
     intensity: (dx, dy, _dist, age, maxAge, maxRadius) => {
       const progress = age / maxAge;
-      const launchEnd = 0.12; // 12% of life = fast rocket
+      const launchEnd = 0.06; // REDUCED DELAY: 6% of life = fast rocket
       const travelDist = maxRadius * 0.8;
 
       // Phase 1: rocket going up
@@ -616,6 +617,8 @@ interface ActiveEffect {
   /** Effective values after applying multipliers */
   effectiveMaxAge: number;
   effectiveMaxRadius: number;
+  /** Whether the effect is in multicolor mode */
+  isMulti: boolean;
 }
 
 // ── Utility: RGB → HSL ───────────────────────────────
@@ -760,7 +763,14 @@ export class EffectsEngine {
       this.effects.shift();
     }
 
-    const hsl = rgbToHsl(color[0], color[1], color[2]);
+    const isMulti = color[0] === -1;
+    let effectColor: RGB = color;
+    if (isMulti) {
+      const hue = (performance.now() / 10) % 360;
+      effectColor = hslToRgb(hue, 100, 50);
+    }
+
+    const hsl = rgbToHsl(effectColor[0], effectColor[1], effectColor[2]);
     // Ensure the colour has enough brightness to be visible
     if (hsl[2] < 10) hsl[2] = 30;
 
@@ -776,13 +786,14 @@ export class EffectsEngine {
     this.effects.push({
       col,
       row,
-      color,
+      color: effectColor,
       hsl,
       age: 0,
       preset: this._preset,
       presetIndex: EFFECT_PRESETS.indexOf(this._preset),
       effectiveMaxAge,
       effectiveMaxRadius,
+      isMulti,
     });
 
     // Start animation loop if not running
@@ -916,7 +927,7 @@ export class EffectsEngine {
 
           // Compute colour — optionally hue-shifted
           let pr: number, pg: number, pb: number;
-          if (hasHueShift) {
+          if (hasHueShift && effect.isMulti) {
             const shift = preset.hueShift!(dist, age);
             const shifted = hslToRgb((hH + shift) % 360, hS, hL);
             pr = shifted[0];
