@@ -328,8 +328,8 @@ export default function ControlPanel({
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => onCellSizeChange(settings.cellSize - 1)}
-                            disabled={settings.cellSize <= 2}
-                            className={`rounded px-1.5 py-0.5 text-[10px] transition min-h-6 sm:min-h-0 ${settings.cellSize <= 2 ? "opacity-30 cursor-not-allowed bg-white/5" : "bg-white/10 hover:bg-white/20 text-white/70"
+                            disabled={settings.cellSize <= 1}
+                            className={`rounded px-1.5 py-0.5 text-[10px] transition min-h-6 sm:min-h-0 ${settings.cellSize <= 1 ? "opacity-30 cursor-not-allowed bg-white/5" : "bg-white/10 hover:bg-white/20 text-white/70"
                                 }`}
                             title="Decrease cell size"
                         >
@@ -337,7 +337,7 @@ export default function ControlPanel({
                         </button>
                         <input
                             type="range"
-                            min={2}
+                            min={1}
                             max={40}
                             step={1}
                             value={settings.cellSize}
@@ -355,9 +355,15 @@ export default function ControlPanel({
                         </button>
                     </div>
                     <div className="flex items-center justify-between text-[9px] text-white/30">
-                        <span>2px (more cells)</span>
+                        <span>1px (more cells)</span>
                         <span>40px (larger)</span>
                     </div>
+                    {settings.cellSize === 1 && (
+                        <div className="text-[9px] text-yellow-400/70 flex items-center gap-1 mt-0.5">
+                            <span>⚠</span>
+                            <span>1px cells = millions of pixels — may be slow on some devices</span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Separator */}

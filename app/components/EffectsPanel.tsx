@@ -68,6 +68,53 @@ function EffectIcon({ name, size = 14 }: { name: string; size?: number }) {
                     <circle cx="6" cy="13" r="0.5" />
                 </svg>
             );
+        case "Firework":
+            return (
+                <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" opacity={0.7}>
+                    <line x1="8" y1="14" x2="8" y2="6" />
+                    <line x1="8" y1="6" x2="4" y2="2" />
+                    <line x1="8" y1="6" x2="12" y2="2" />
+                    <line x1="8" y1="6" x2="3" y2="7" />
+                    <line x1="8" y1="6" x2="13" y2="7" />
+                    <line x1="8" y1="6" x2="5" y2="4" />
+                    <line x1="8" y1="6" x2="11" y2="4" />
+                    <circle cx="8" cy="6" r="1" fill="currentColor" />
+                </svg>
+            );
+        case "Vortex":
+            return (
+                <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" opacity={0.7}>
+                    <path d="M8 3c4 0 5 3 3 5s-5 1-3 5" />
+                    <path d="M8 3c-4 0-5 3-3 5s5 1 3 5" strokeDasharray="2 1.5" />
+                    <circle cx="8" cy="8" r="1.5" fill="currentColor" />
+                </svg>
+            );
+        case "Plasma":
+            return (
+                <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" opacity={0.6}>
+                    <ellipse cx="8" cy="8" rx="5" ry="4" />
+                    <ellipse cx="6" cy="7" rx="3" ry="2.5" opacity={0.5} />
+                    <ellipse cx="10" cy="9" rx="2.5" ry="2" opacity={0.4} />
+                </svg>
+            );
+        case "Shockwave":
+            return (
+                <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" opacity={0.7}>
+                    <circle cx="8" cy="8" r="3" strokeWidth="2" />
+                    <circle cx="8" cy="8" r="6" strokeWidth="1.5" strokeDasharray="3 1.5" />
+                    <circle cx="8" cy="8" r="1" fill="currentColor" />
+                </svg>
+            );
+        case "Butterfly":
+            return (
+                <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" opacity={0.7}>
+                    <line x1="8" y1="3" x2="8" y2="13" stroke="currentColor" strokeWidth="1" />
+                    <ellipse cx="5.5" cy="6" rx="3" ry="2.5" opacity={0.8} />
+                    <ellipse cx="10.5" cy="6" rx="3" ry="2.5" opacity={0.8} />
+                    <ellipse cx="6" cy="10.5" rx="2" ry="1.8" opacity={0.5} />
+                    <ellipse cx="10" cy="10.5" rx="2" ry="1.8" opacity={0.5} />
+                </svg>
+            );
         default:
             return (
                 <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" opacity={0.7}>
