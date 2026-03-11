@@ -58,7 +58,7 @@ canvas {
 }
 /* Overlay scrollbar so it doesn't consume layout space */
 .thin-scrollbar {
-  overflow-y: overlay;
+  overflow-y: auto;
 }
 
 /* ── Panel slide-in animation ──────────────────────── */

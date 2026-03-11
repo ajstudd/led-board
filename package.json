@@ -16,13 +16,20 @@
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
+  "browserslist": [
+    ">= 0.5%",
+    "Firefox >= 95",
+    "not dead"
+  ],
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "browserslist": "^4.28.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "postcss-lightningcss": "^1.0.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
