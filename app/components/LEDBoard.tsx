@@ -26,6 +26,8 @@ const STORAGE_KEY_EFFECT_SPEED = "tenix-effectSpeed";
 const STORAGE_KEY_CELL_SIZE = "tenix-cellSize";
 const MAX_UNDO = 50;
 
+const SHAPE_TOOLS: Set<ToolKind> = new Set(["line", "rect", "circle"]);
+
 export default function LEDBoard() {
     const gridRef = useRef<GridManager | null>(null);
     const canvasHandleRef = useRef<CanvasHandle>(null);
@@ -76,6 +78,10 @@ export default function LEDBoard() {
     const undoStackRef = useRef<Uint8ClampedArray[]>([]);
     const strokeActiveRef = useRef(false);
     const [canUndo, setCanUndo] = useState(false);
+
+    // ── Shape tool state (for line / rect / circle) ────
+    const shapeStartRef = useRef<{ col: number; row: number } | null>(null);
+    const shapePreviewDataRef = useRef<Uint8ClampedArray | null>(null);
 
     // ── Session recording state ────────────────────────
     const sessionRecRef = useRef<SessionRecorder>(sessionRecorder);
@@ -766,6 +772,22 @@ export default function LEDBoard() {
     // ── Click callback (applies tool once) ─────────────
     const handleCellClick = useCallback(
         (col: number, row: number) => {
+            const grid = gridRef.current;
+            if (!grid) return;
+
+            if (SHAPE_TOOLS.has(activeTool)) {
+                // Shape tools: record start point and save grid state for preview
+                pushUndo();
+                strokeActiveRef.current = true;
+                shapeStartRef.current = { col, row };
+
+                const snap = snapshotRef.current;
+                shapePreviewDataRef.current = snap
+                    ? new Uint8ClampedArray(snap)
+                    : grid.cloneData();
+                return;
+            }
+
             if (activeTool !== "vibe" && !strokeActiveRef.current) {
                 pushUndo();
                 strokeActiveRef.current = true;
@@ -778,19 +800,82 @@ export default function LEDBoard() {
     // ── Drag callbacks (for draw/erase continuous strokes)
     const handleCellDrag = useCallback(
         (col: number, row: number) => {
+            const grid = gridRef.current;
+            if (!grid) return;
+
+            if (SHAPE_TOOLS.has(activeTool)) {
+                const start = shapeStartRef.current;
+                const saved = shapePreviewDataRef.current;
+                if (!start || !saved) return;
+
+                // Resolve draw colour (handle rainbow mode)
+                const isMulti = activeColor[0] === -1;
+                let drawColor: RGB = activeColor;
+                if (isMulti) {
+                    const hue = (performance.now() / 10) % 360;
+                    drawColor = hslToRgb(hue, 100, 50);
+                }
+
+                const snap = snapshotRef.current;
+                if (snap) {
+                    // Animation mode: restore content buffer, draw shape preview
+                    snap.set(saved);
+                    grid.loadData(snap);
+                } else {
+                    // Normal mode: restore grid data
+                    grid.loadData(saved);
+                }
+
+                // Draw the shape on the grid
+                switch (activeTool) {
+                    case "line":
+                        grid.drawLine(start.col, start.row, col, row, drawColor);
+                        break;
+                    case "rect":
+                        grid.drawRect(start.col, start.row, col, row, drawColor);
+                        break;
+                    case "circle":
+                        grid.drawEllipse(start.col, start.row, col, row, drawColor);
+                        break;
+                }
+
+                if (snap) {
+                    // Copy grid back to snapshot buffer
+                    snapshotRef.current = grid.cloneData();
+                    captureSnapshot(snapshotRef.current);
+                }
+                canvasHandleRef.current?.redraw();
+                return;
+            }
+
             if (activeTool === "fill") return; // fill only on click
             if (activeTool === "vibe") { applyTool(col, row); return; } // vibe triggers effects on drag
             applyTool(col, row);
         },
-        [activeTool, applyTool],
+        [activeTool, activeColor, applyTool],
     );
 
     const handleDragEnd = useCallback(() => {
+        if (SHAPE_TOOLS.has(activeTool) && shapeStartRef.current) {
+            // Shape committed — record the bulk change for stroke recording
+            const grid = gridRef.current;
+            if (grid && shapePreviewDataRef.current) {
+                const snap = snapshotRef.current;
+                const after = snap ?? grid.data;
+                strokeRecorder.recordBulk(shapePreviewDataRef.current, after, grid.cols);
+            }
+            shapeStartRef.current = null;
+            shapePreviewDataRef.current = null;
+            strokeActiveRef.current = false;
+            saveGridToStorage();
+            return;
+        }
+
         if (strokeActiveRef.current) {
             strokeActiveRef.current = false;
             saveGridToStorage();
         }
-    }, [saveGridToStorage]);
+    }, [activeTool, saveGridToStorage]);
 
     // ── Gesture callbacks ─────────────────────────────
     // Cursor moved (screen pixels from MediaPipe)
