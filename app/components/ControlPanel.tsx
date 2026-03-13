@@ -127,6 +127,9 @@ const TOOLS: { kind: ToolKind; label: string; shortLabel: string }[] = [
     { kind: "draw", label: "Draw", shortLabel: "Draw" },
     { kind: "erase", label: "Erase", shortLabel: "Erase" },
     { kind: "fill", label: "Fill", shortLabel: "Fill" },
+    { kind: "line", label: "Line", shortLabel: "Line" },
+    { kind: "rect", label: "Rectangle", shortLabel: "Rect" },
+    { kind: "circle", label: "Circle", shortLabel: "Circle" },
     { kind: "vibe", label: "Vibe", shortLabel: "Vibe" },
 ];
 
@@ -160,6 +163,24 @@ function ToolIcon({ kind, size = 14 }: { kind: ToolKind; size?: number }) {
                     <circle cx="8" cy="8" r="2" />
                     <path d="M8 1v2M8 13v2M1 8h2M13 8h2" />
                     <path d="M3.5 3.5l1.5 1.5M11 11l1.5 1.5M3.5 12.5l1.5-1.5M11 5l1.5-1.5" />
+                </svg>
+            );
+        case "line":
+            return (
+                <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="2" y1="14" x2="14" y2="2" />
+                </svg>
+            );
+        case "rect":
+            return (
+                <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="3" width="12" height="10" rx="0.5" />
+                </svg>
+            );
+        case "circle":
+            return (
+                <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <ellipse cx="8" cy="8" rx="6" ry="5" />
                 </svg>
             );
     }
@@ -396,6 +417,9 @@ export default function ControlPanel({
                                 <li>✏ Draw — click or drag to paint</li>
                                 <li>◻ Erase — click or drag to erase</li>
                                 <li>◼ Fill — click to flood-fill a region</li>
+                                <li>╱ Line — drag to draw a line</li>
+                                <li>▭ Rect — drag to draw a rectangle</li>
+                                <li>◯ Circle — drag to draw an ellipse</li>
                                 <li>✦ Vibe — drag for pixel effects only</li>
                                 <li className="pt-0.5 text-white/50"><span className="text-white/70">F</span> fullscreen · <span className="text-white/70">Space</span> pause / play</li>
                             </ul>
