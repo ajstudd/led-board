@@ -26,13 +26,16 @@ export class AnimationManager {
   private _data: Uint8ClampedArray | null = null;
   private _redraw: () => void;
   private _onStateChange?: (state: AnimationState) => void;
+  private _onFrameChange?: (frame: number) => void;
 
   constructor(
     redraw: () => void,
     onStateChange?: (state: AnimationState) => void,
+    onFrameChange?: (frame: number) => void
   ) {
     this._redraw = redraw;
     this._onStateChange = onStateChange;
+    this._onFrameChange = onFrameChange;
   }
 
   // ── Public getters ────────────────────────────────────
@@ -135,6 +138,7 @@ export class AnimationManager {
   private _tick(): void {
     if (!this._animation || !this._data) return;
     this._animation.tick(this._cols, this._rows, this._data, this._frame);
+    this._onFrameChange?.(this._frame);
     this._frame++;
     this._redraw();
   }

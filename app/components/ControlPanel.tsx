@@ -6,11 +6,15 @@ import ColorPicker from "./ColorPicker";
 import PatternSelector from "./PatternSelector";
 import AnimationPanel from "./AnimationPanel";
 import RecordingPanel from "./RecordingPanel";
+import ExportPanel from "./ExportPanel";
 import EffectsPanel from "./EffectsPanel";
+import PaletteSelector from "./PaletteSelector";
 import { AnimationState } from "../lib/animation";
 import { RecordingState } from "../lib/sessionRecorder";
+import { SessionRecorder } from "../lib/sessionRecorder";
 import { EffectPreset } from "../lib/effects";
-import InfoTooltip from "./InfoTooltip";
+import { LayerManager } from "../lib/layerManager";
+import LayerPanel from "./LayerPanel";
 
 /** Small canvas that mirrors the gesture video feed at ~15 fps */
 function GestureCameraPreview({
@@ -121,6 +125,16 @@ interface ControlPanelProps {
     onToggleGestureCamera: () => void;
     /** Forwarded ref so LEDBoard can hit-test pinch events against the panel */
     panelRef: React.RefObject<HTMLDivElement | null>;
+    // Export
+    exportRecorder: SessionRecorder;
+    exportGetGridData: () => Uint8ClampedArray | null;
+    // Palette
+    activePaletteId: string | null;
+    onSelectPalette: (id: string | null) => void;
+    onApplyPaletteToBoard: () => void;
+    // Layer props
+    layerManager: LayerManager | null;
+    onLayerChange: () => void;
 }
 
 const TOOLS: { kind: ToolKind; label: string; shortLabel: string }[] = [
@@ -163,6 +177,45 @@ function ToolIcon({ kind, size = 14 }: { kind: ToolKind; size?: number }) {
                 </svg>
             );
     }
+}
+
+function AccordionSection({
+    title,
+    icon,
+    isOpen,
+    onToggle,
+    children
+}: {
+    title: string;
+    icon?: React.ReactNode;
+    isOpen: boolean;
+    onToggle: () => void;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="border border-white/5 bg-white/[0.02] rounded-lg">
+            <button
+                onClick={onToggle}
+                className="w-full flex items-center justify-between px-3 py-2 sm:py-2 text-xs font-semibold hover:bg-white/5 transition text-white/80 rounded-lg"
+            >
+                <div className="flex items-center gap-2 text-emerald-400">
+                    {icon}
+                    <span className="text-white/80 uppercase tracking-widest text-[9px]">{title}</span>
+                </div>
+                <svg
+                    className={`transition-transform duration-200 ${isOpen ? "rotate-90 text-white" : "text-white/40"}`}
+                    width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                >
+                    <polyline points="9 18 15 12 9 6" />
+                </svg>
+            </button>
+            {isOpen && (
+                <div className="p-3 border-t border-white/5 rounded-b-lg">
+                    {children}
+                </div>
+            )}
+        </div>
+    );
 }
 
 export default function ControlPanel({
@@ -223,8 +276,31 @@ export default function ControlPanel({
     gestureShowCamera,
     onToggleGestureCamera,
     panelRef,
+    exportRecorder,
+    exportGetGridData,
+    activePaletteId,
+    onSelectPalette,
+    onApplyPaletteToBoard,
+    layerManager,
+    onLayerChange,
 }: ControlPanelProps) {
     const [collapsed, setCollapsed] = useState(false);
+    const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+        tools: true,
+        layers: true,
+        patterns: true,
+        animations: true,
+        effects: true,
+        gestures: true,
+        session: true,
+    });
+
+    const toggleSection = (id: string) => {
+        setOpenSections((prev) => ({
+            ...prev,
+            [id]: !prev[id],
+        }));
+    };
 
     // ── Swipe-to-open on mobile ──────────────────────────
     const touchStartX = useRef(0);
@@ -369,213 +445,177 @@ export default function ControlPanel({
                 {/* Separator */}
                 <div className="h-px bg-white/10" />
 
-                {/* Tools */}
-                <div>
-                    <div className="mb-1 text-[10px] uppercase tracking-widest text-white/40">
-                        Tools
-                    </div>
-                    <div className="flex gap-1 flex-wrap items-center">
-                        {TOOLS.map((t) => (
+                <div className="flex flex-col gap-2 relative">
+                    <AccordionSection title="Drawing Tools" isOpen={!!openSections.tools} onToggle={() => toggleSection("tools")}>
+                        <div className="flex gap-1 flex-wrap items-center mb-4">
+                            {TOOLS.map((t) => (
+                                <button
+                                    key={t.kind}
+                                    onClick={() => onToolChange(t.kind)}
+                                    className={`flex items-center gap-1 rounded px-2 py-2 sm:py-1.5 text-[11px] transition shrink-0 min-h-9 sm:min-h-0 ${activeTool === t.kind
+                                        ? t.kind === "vibe"
+                                            ? "bg-fuchsia-500/30 text-fuchsia-300 ring-1 ring-fuchsia-500/50"
+                                            : "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
+                                        : "bg-white/5 text-white/70 hover:bg-white/10"
+                                        }`}
+                                    title={t.label}
+                                >
+                                    <ToolIcon kind={t.kind} size={12} />
+                                    <span className="leading-none">{t.shortLabel}</span>
+                                </button>
+                            ))}
+                        </div>
+                        <div className="mb-4">
+                            <ColorPicker activeColor={activeColor} onColorChange={onColorChange} activePaletteId={activePaletteId} />
+                        </div>
+                        <PaletteSelector
+                            activePaletteId={activePaletteId}
+                            onSelectPalette={onSelectPalette}
+                            activeColor={activeColor}
+                            onApplyPaletteToBoard={onApplyPaletteToBoard}
+                        />
+                    </AccordionSection>
+
+                    <AccordionSection title="Layers" isOpen={!!openSections.layers} onToggle={() => toggleSection("layers")}>
+                        <LayerPanel layerManager={layerManager} onLayerChange={onLayerChange} />
+                    </AccordionSection>
+
+                    <AccordionSection title="Patterns & Text" isOpen={!!openSections.patterns} onToggle={() => toggleSection("patterns")}>
+                        <PatternSelector
+                            onApplyPattern={onApplyPattern}
+                            onRenderText={onRenderText}
+                            activeColor={activeColor}
+                        />
+                    </AccordionSection>
+
+                    <AccordionSection title="Animations" isOpen={!!openSections.animations} onToggle={() => toggleSection("animations")}>
+                        <AnimationPanel
+                            animState={animState}
+                            currentAnim={currentAnim}
+                            fps={animFps}
+                            frame={animFrame}
+                            onSelectAnimation={onSelectAnimation}
+                            onPlay={onAnimPlay}
+                            onPause={onAnimPause}
+                            onStop={onAnimStop}
+                            onFpsChange={onAnimFpsChange}
+                        />
+                    </AccordionSection>
+
+                    <AccordionSection title="VFX Shaders" isOpen={!!openSections.effects} onToggle={() => toggleSection("effects")}>
+                        <EffectsPanel
+                            enabled={effectsEnabled}
+                            activePreset={activeEffectPreset}
+                            distanceMultiplier={effectsDistanceMultiplier}
+                            speedMultiplier={effectsSpeedMultiplier}
+                            onToggle={onToggleEffects}
+                            onSelectPreset={onSelectEffectPreset}
+                            onDistanceChange={onEffectsDistanceChange}
+                            onSpeedChange={onEffectsSpeedChange}
+                        />
+                    </AccordionSection>
+
+                    <AccordionSection title="AI Gestures" isOpen={!!openSections.gestures} onToggle={() => toggleSection("gestures")}>
+                        <div className="flex flex-col gap-1.5">
                             <button
-                                key={t.kind}
-                                onClick={() => onToolChange(t.kind)}
-                                className={`flex items-center gap-1 rounded px-2 py-2 sm:py-1.5 text-[11px] transition shrink-0 min-h-9 sm:min-h-0 ${activeTool === t.kind
-                                    ? t.kind === "vibe"
-                                        ? "bg-fuchsia-500/30 text-fuchsia-300 ring-1 ring-fuchsia-500/50"
-                                        : "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
-                                    : "bg-white/5 text-white/70 hover:bg-white/10"
-                                    }`}
-                                title={t.label}
+                                onClick={onToggleGesture}
+                                className={`w-full rounded border px-2 py-2 sm:py-1.5 text-xs transition text-left min-h-9 sm:min-h-0 flex items-center gap-2 ${gestureEnabled ? 'bg-purple-900/60 border-purple-500/40 text-purple-200' : 'bg-white/10 hover:bg-white/20 border-white/5'} `}
                             >
-                                <ToolIcon kind={t.kind} size={12} />
-                                <span className="leading-none">{t.shortLabel}</span>
+                                <span>Magic Hand AI</span>
+                                {gestureEnabled ? (
+                                    <span className="ml-auto text-purple-400 animate-pulse text-[10px]">● ON</span>
+                                ) : (
+                                    <span className="ml-auto text-white/30 text-[10px]">OFF</span>
+                                )}
                             </button>
-                        ))}
-                        <InfoTooltip title="Tools &amp; Shortcuts" width={200}>
-                            <ul className="flex flex-col gap-1">
-                                <li>✏ Draw — click or drag to paint</li>
-                                <li>◻ Erase — click or drag to erase</li>
-                                <li>◼ Fill — click to flood-fill a region</li>
-                                <li>✦ Vibe — drag for pixel effects only</li>
-                                <li className="pt-0.5 text-white/50"><span className="text-white/70">F</span> fullscreen · <span className="text-white/70">Space</span> pause / play</li>
-                            </ul>
-                        </InfoTooltip>
-                    </div>
-                </div>
 
-                {/* Separator */}
-                <div className="h-px bg-white/10" />
-
-                {/* Color Picker */}
-                <div>
-                    <div className="mb-1 text-[10px] uppercase tracking-widest text-white/40">
-                        Colour
-                    </div>
-                    <ColorPicker activeColor={activeColor} onColorChange={onColorChange} />
-                </div>
-
-                {/* Separator */}
-                <div className="h-px bg-white/10" />
-
-                {/* Patterns & Text */}
-                <PatternSelector
-                    onApplyPattern={onApplyPattern}
-                    onRenderText={onRenderText}
-                    activeColor={activeColor}
-                />
-
-                {/* Separator */}
-                <div className="h-px bg-white/10" />
-
-                {/* Animations */}
-                <AnimationPanel
-                    animState={animState}
-                    currentAnim={currentAnim}
-                    fps={animFps}
-                    frame={animFrame}
-                    onSelectAnimation={onSelectAnimation}
-                    onPlay={onAnimPlay}
-                    onPause={onAnimPause}
-                    onStop={onAnimStop}
-                    onFpsChange={onAnimFpsChange}
-                />
-
-                {/* Separator */}
-                <div className="h-px bg-white/10" />
-
-                {/* Session Recording */}
-                <RecordingPanel
-                    recordingState={recordingState}
-                    hasRecording={hasRecording}
-                    frameCount={recFrameCount}
-                    duration={recDuration}
-                    playbackFrame={recPlaybackFrame}
-                    loopEnabled={loopEnabled}
-                    onToggleLoop={onToggleLoop}
-                    onStartRecording={onStartRecording}
-                    onStopRecording={onStopRecording}
-                    onStartPlayback={onStartPlayback}
-                    onPausePlayback={onPausePlayback}
-                    onStopPlayback={onStopPlayback}
-                    onExportRecording={onExportRecording}
-                    onImportRecording={onImportRecording}
-                    onClearRecording={onClearRecording}
-                />
-
-                {/* Separator */}
-                <div className="h-px bg-white/10" />
-
-                {/* Pixel Effects */}
-                <EffectsPanel
-                    enabled={effectsEnabled}
-                    activePreset={activeEffectPreset}
-                    distanceMultiplier={effectsDistanceMultiplier}
-                    speedMultiplier={effectsSpeedMultiplier}
-                    onToggle={onToggleEffects}
-                    onSelectPreset={onSelectEffectPreset}
-                    onDistanceChange={onEffectsDistanceChange}
-                    onSpeedChange={onEffectsSpeedChange}
-                />
-
-                {/* Separator */}
-                <div className="h-px bg-white/10" />
-
-                {/* Gesture Control */}
-                <div className="flex flex-col gap-1.5">
-                    {/* Toggle row */}
-                    <button
-                        onClick={onToggleGesture}
-                        className="w-full rounded bg-white/10 px-2 py-2 sm:py-1.5 text-xs hover:bg-white/20 transition text-left min-h-9 sm:min-h-0 flex items-center gap-2"
-                    >
-                        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity={0.7}>
-                            <path d="M18 11V6a2 2 0 00-2-2 2 2 0 00-2 2" />
-                            <path d="M14 10V4a2 2 0 00-2-2 2 2 0 00-2 2v2" />
-                            <path d="M10 10.5V6a2 2 0 00-2-2 2 2 0 00-2 2v8" />
-                            <path d="M18 8a2 2 0 114 0v6a8 8 0 01-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 012.83-2.82L7 15" />
-                        </svg>
-                        <span>Gesture Control</span>
-                        {gestureEnabled && (
-                            <span className="ml-auto text-purple-400 animate-pulse text-[10px]">● ON</span>
-                        )}
-                    </button>
-
-                    {gestureEnabled && (
-                        <div className="flex flex-col gap-1.5 pl-1">
-                            {/* Status pill */}
-                            <div className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[10px] font-mono border ${gestureLoadState === "ready"
-                                ? "bg-purple-950/60 border-purple-500/30 text-purple-200"
-                                : gestureLoadState === "error"
-                                    ? "bg-red-950/60 border-red-500/30 text-red-300"
-                                    : "bg-black/40 border-white/10 text-white/40"
-                                }`}>
-                                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${gestureLoadState === "ready"
-                                    ? gesturePinching ? "bg-yellow-400 animate-ping" : "bg-purple-400 animate-pulse"
-                                    : gestureLoadState === "error" ? "bg-red-400" : "bg-blue-400 animate-pulse"
-                                    }`} />
-                                <span className="flex-1 truncate">{gestureStatusMsg}</span>
-                                {/* Camera toggle */}
-                                {gestureLoadState === "ready" && (
-                                    <button
-                                        onClick={onToggleGestureCamera}
-                                        className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[9px] transition shrink-0"
-                                        title={gestureShowCamera ? "Hide camera" : "Show camera"}
-                                    >
-                                        {gestureShowCamera ? "hide cam" : "show cam"}
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* Camera preview -- canvas mirrors the video feed which lives in LEDBoard */}
-                            <div className={`relative rounded-lg overflow-hidden border transition-all duration-200 ${gestureShowCamera ? "h-28" : "h-0 opacity-0 pointer-events-none"
-                                } ${gestureLoadState === "ready"
-                                    ? gesturePinching ? "border-yellow-500/50" : "border-purple-500/30"
-                                    : "border-white/10"
-                                }`}>
-                                <GestureCameraPreview
-                                    videoRef={gestureVideoRef}
-                                    visible={gestureShowCamera}
-                                    ready={gestureLoadState === "ready"}
-                                />
-                                {gestureLoadState !== "ready" && gestureShowCamera && (
-                                    <div className="absolute inset-0 bg-black/75 flex items-center justify-center text-[9px] text-white/50 font-mono px-2 text-center leading-tight">
-                                        {gestureStatusMsg}
+                            {gestureEnabled && (
+                                <div className="flex flex-col gap-2 mt-2">
+                                    <div className={`flex items-center gap-2 rounded px-2 py-1.5 text-[10px] font-mono border ${gestureLoadState === "ready"
+                                        ? "bg-purple-950/60 border-purple-500/30 text-purple-200"
+                                        : gestureLoadState === "error"
+                                            ? "bg-red-950/60 border-red-500/30 text-red-300"
+                                            : "bg-black/40 border-white/10 text-white/40"
+                                        }`}>
+                                        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${gestureLoadState === "ready"
+                                            ? gesturePinching ? "bg-yellow-400 animate-ping" : "bg-purple-400 animate-pulse"
+                                            : gestureLoadState === "error" ? "bg-red-400" : "bg-blue-400 animate-pulse"
+                                            }`} />
+                                        <span className="flex-1 truncate">{gestureStatusMsg}</span>
+                                        {gestureLoadState === "ready" && (
+                                            <button
+                                                onClick={onToggleGestureCamera}
+                                                className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[9px] transition shrink-0"
+                                            >
+                                                {gestureShowCamera ? "hide cam" : "show cam"}
+                                            </button>
+                                        )}
                                     </div>
-                                )}
-                                {gestureLoadState === "ready" && (
-                                    <div className="absolute top-1 left-1 text-[7px] text-white/30 bg-black/50 rounded px-1 font-mono">LIVE</div>
-                                )}
-                                {gesturePinching && (
-                                    <div className="absolute inset-0 border-2 border-yellow-400/50 rounded-lg pointer-events-none animate-pulse" />
-                                )}
-                            </div>
 
-                            {/* Pinch sensitivity */}
-                            {gestureLoadState === "ready" && (
-                                <div className="flex items-center gap-2 text-[9px] text-white/40">
-                                    <span className="shrink-0">Pinch sens</span>
-                                    <input
-                                        type="range" min={3} max={15} step={1}
-                                        value={Math.round(gesturePinchThreshold * 100)}
-                                        onChange={(e) => onGesturePinchThresholdChange(parseInt(e.target.value) / 100)}
-                                        className="flex-1 accent-purple-400 cursor-pointer"
-                                    />
-                                    <span className="w-4 text-right">{Math.round(gesturePinchThreshold * 100)}</span>
+                                    <div className={`relative rounded overflow-hidden border transition-all duration-200 ${gestureShowCamera ? "h-28" : "h-0 opacity-0"
+                                        } ${gestureLoadState === "ready"
+                                            ? gesturePinching ? "border-yellow-500/50" : "border-purple-500/30"
+                                            : "border-white/10"
+                                        }`}>
+                                        <GestureCameraPreview
+                                            videoRef={gestureVideoRef}
+                                            visible={gestureShowCamera}
+                                            ready={gestureLoadState === "ready"}
+                                        />
+                                        {gestureLoadState !== "ready" && gestureShowCamera && (
+                                            <div className="absolute inset-0 bg-black/75 flex items-center justify-center text-[9px] text-white/50 text-center px-2">
+                                                {gestureStatusMsg}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex flex-col gap-1 mt-1">
+                                        <div className="flex justify-between text-[9px] text-white/50 px-1">
+                                            <span>Pinch Sensitivity</span>
+                                            <span>{gesturePinchThreshold.toFixed(2)}</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0.02"
+                                            max="0.15"
+                                            step="0.01"
+                                            value={gesturePinchThreshold}
+                                            onChange={(e) => onGesturePinchThresholdChange(parseFloat(e.target.value))}
+                                            className="w-full accent-purple-400 h-1"
+                                        />
+                                    </div>
                                 </div>
                             )}
-
-                            {/* Info tooltip */}
-                            <InfoTooltip title="Gesture Controls">
-                                <ul className="flex flex-col gap-1">
-                                    <li>☝ Point finger → moves cursor</li>
-                                    <li>🤌 Pinch → click / draw (hold = drag)</li>
-                                    <li>✌ Two fingers up/down → scroll panel</li>
-                                    <li>🫲 Slap (thumb out, 4 fingers together) → clear board</li>
-                                    <li>👋 Open-hand swipe left/right → clear board</li>
-                                    <li className="text-white/40 pt-0.5">Enable Pixel Effects for glow on draw</li>
-                                </ul>
-                            </InfoTooltip>
                         </div>
-                    )}
+                    </AccordionSection>
+
+                    <AccordionSection title="Session & Rendering" isOpen={!!openSections.session} onToggle={() => toggleSection("session")}>
+                        <RecordingPanel
+                            recordingState={recordingState}
+                            hasRecording={hasRecording}
+                            frameCount={recFrameCount}
+                            duration={recDuration}
+                            playbackFrame={recPlaybackFrame}
+                            loopEnabled={loopEnabled}
+                            onToggleLoop={onToggleLoop}
+                            onStartRecording={onStartRecording}
+                            onStopRecording={onStopRecording}
+                            onStartPlayback={onStartPlayback}
+                            onPausePlayback={onPausePlayback}
+                            onStopPlayback={onStopPlayback}
+                            onExportRecording={onExportRecording}
+                            onImportRecording={onImportRecording}
+                            onClearRecording={onClearRecording}
+                        />
+                        <div className="h-px bg-white/10 my-3" />
+                        <ExportPanel
+                            cols={gridDims.cols}
+                            rows={gridDims.rows}
+                            getGridData={exportGetGridData}
+                            recorder={exportRecorder}
+                            hasRecording={hasRecording}
+                        />
+                    </AccordionSection>
                 </div>
 
                 {/* Separator */}

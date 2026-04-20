@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "app/components/LEDBoard.new.tsx",
+    "app/components/LEDBoardLayered.tsx",
   ]),
 ]);
 

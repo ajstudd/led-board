@@ -8,7 +8,7 @@ import {
     forwardRef,
     useImperativeHandle,
 } from "react";
-import { GridManager } from "../lib/grid";
+import { LayerManager } from "../lib/layerManager";
 import { DEFAULT_SETTINGS, BoardSettings } from "../types";
 import { EffectsOverlay } from "../lib/effects";
 
@@ -18,7 +18,7 @@ export interface CanvasHandle {
 }
 
 interface CanvasProps {
-    gridRef: React.RefObject<GridManager | null>;
+    layerManagerRef: React.RefObject<LayerManager | null>;
     effectsOverlayRef?: React.RefObject<EffectsOverlay | null>;
     settings?: BoardSettings;
     onCellHover?: (col: number, row: number) => void;
@@ -31,7 +31,7 @@ interface CanvasProps {
 
 const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
     {
-        gridRef,
+        layerManagerRef,
         effectsOverlayRef,
         settings = DEFAULT_SETTINGS,
         onCellHover,
@@ -58,14 +58,19 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
     // ── Draw the grid onto the canvas (ImageData fast-path) ──
     const drawGrid = useCallback(() => {
         const canvas = canvasRef.current;
-        const grid = gridRef.current;
-        if (!canvas || !grid) return;
+        const layerManager = layerManagerRef.current;
+        if (!canvas || !layerManager) return;
 
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
-        const { cols, rows, cellSize } = grid.dimensions;
-        const data = grid.data;
+        // Use the active layer's dimensions for rendering (they all share the same dimension)
+        const activeLayer = layerManager.getActiveLayer();
+        if (!activeLayer) return;
+        const { cols, rows, cellSize } = activeLayer.grid.dimensions;
+        
+        // Composite all visible layers into a single pixel array
+        const data = layerManager.composite();
         const bg = settings.backgroundColor;
 
         // -- 1. Ensure offscreen cell canvas is the right size --
@@ -172,7 +177,7 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
             ctx.drawImage(eCanvas, 0, 0, dw, dh);
             ctx.globalCompositeOperation = "source-over";
         }
-    }, [gridRef, effectsOverlayRef, settings]);
+    }, [layerManagerRef, effectsOverlayRef, settings]);
 
     // ── Expose redraw & canvas ref to parent ──────────────
     useImperativeHandle(
@@ -187,7 +192,7 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
     // ── Resize handler ────────────────────────────────────
     const handleResize = useCallback(() => {
         const canvas = canvasRef.current;
-        const grid = gridRef.current;
+        const grid = layerManagerRef.current;
         if (!canvas || !grid) return;
 
         // Capture old dims BEFORE resize
@@ -200,10 +205,10 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
         canvas.width = w;
         canvas.height = h;
 
-        grid.resizePreserve(w, h);
+        const newCols = Math.floor(w / settings.cellSize);
+        const newRows = Math.floor(h / settings.cellSize);
 
-        const newCols = grid.cols;
-        const newRows = grid.rows;
+        grid.resizePreserveDims(newCols, newRows);
 
         // Notify parent so it can resize snapshot / undo stack
         if ((oldCols !== newCols || oldRows !== newRows) && onGridResize) {
@@ -213,7 +218,7 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
         // Cancel any pending frame, schedule a new one
         cancelAnimationFrame(rafRef.current);
         rafRef.current = requestAnimationFrame(drawGrid);
-    }, [gridRef, drawGrid, onGridResize]);
+    }, [layerManagerRef, drawGrid, onGridResize, settings]);
 
     // ── Setup: initial draw + resize via ResizeObserver ──
     // ResizeObserver fires after layout reflow — handles window resize,
@@ -243,7 +248,9 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
     // ── Mouse handlers ────────────────────────────────────
     const cellFromEvent = useCallback(
         (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-            const grid = gridRef.current;
+            const layerManager = layerManagerRef.current;
+            if (!layerManager) return null;
+            const grid = layerManager.getActiveLayer()?.grid;
             if (!grid) return null;
 
             let clientX: number, clientY: number;
@@ -261,7 +268,7 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
             if (!grid.inBounds(col, row)) return null;
             return { col, row };
         },
-        [gridRef]
+        [layerManagerRef]
     );
 
     const handleMouseMove = useCallback(

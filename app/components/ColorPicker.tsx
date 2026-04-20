@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { RGB } from "../types";
 import { rgbToHex, hexToRgb } from "../lib/utils";
+import { getPaletteById } from "../lib/palette";
 
 const PALETTE: RGB[] = [
     [255, 0, 0],
@@ -37,11 +38,13 @@ const PALETTE: RGB[] = [
 interface ColorPickerProps {
     activeColor: RGB;
     onColorChange: (color: RGB) => void;
+    activePaletteId?: string | null;
 }
 
 export default function ColorPicker({
     activeColor,
     onColorChange,
+    activePaletteId,
 }: ColorPickerProps) {
     const [hexInput, setHexInput] = useState(
         activeColor[0] === -1 ? "Multi" : rgbToHex(activeColor[0], activeColor[1], activeColor[2]),
@@ -90,27 +93,32 @@ export default function ColorPicker({
                                 : `rgb(${activeColor[0]},${activeColor[1]},${activeColor[2]})`,
                         }}
                     />
-                    <input
-                        type="color"
-                        value={activeColor[0] === -1 ? "#ffffff" : rgbToHex(activeColor[0], activeColor[1], activeColor[2])}
-                        onChange={handleNativeColorChange}
-                        className="absolute inset-0 h-7 w-7 sm:h-8 sm:w-8 cursor-pointer opacity-0"
-                        title="Pick a colour"
-                    />
+                    {!activePaletteId && (
+                        <input
+                            type="color"
+                            value={activeColor[0] === -1 ? "#ffffff" : rgbToHex(activeColor[0], activeColor[1], activeColor[2])}
+                            onChange={handleNativeColorChange}
+                            className="absolute inset-0 h-7 w-7 sm:h-8 sm:w-8 cursor-pointer opacity-0"
+                            title="Pick a colour"
+                        />
+                    )}
                 </div>
                 <input
                     type="text"
                     value={hexInput}
                     onChange={handleHexChange}
+                    disabled={!!activePaletteId}
                     placeholder="#ff0000"
-                    className="flex-1 min-w-0 rounded bg-white/10 px-2 py-1.5 sm:py-1 text-xs font-mono text-white outline-none focus:ring-1 focus:ring-green-400 min-h-9 sm:min-h-0"
+                    className={`flex-1 min-w-0 rounded bg-white/10 px-2 py-1.5 sm:py-1 text-xs font-mono text-white outline-none min-h-9 sm:min-h-0 ${
+                        activePaletteId ? "opacity-50 cursor-not-allowed" : "focus:ring-1 focus:ring-green-400"
+                    }`}
                     maxLength={7}
                 />
             </div>
 
             {/* Swatch palette */}
             <div className="grid grid-cols-6 gap-1">
-                {PALETTE.map((color, i) => (
+                {(activePaletteId ? getPaletteById(activePaletteId)?.colors || PALETTE : PALETTE).map((color, i) => (
                     <button
                         key={i}
                         onClick={() => handleSwatchClick(color)}

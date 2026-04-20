@@ -35,7 +35,7 @@ interface PatternSelectorProps {
     onApplyPattern: (
         fn: (cols: number, rows: number, data: Uint8ClampedArray) => void,
     ) => void;
-    onRenderText: (text: string, color: RGB, scale?: number, wrap?: boolean) => void;
+    onRenderText: (text: string, color: RGB, scale?: number, wrap?: boolean, animId?: string) => void;
     activeColor: RGB;
 }
 
@@ -48,6 +48,7 @@ export default function PatternSelector({
     const [textInput, setTextInput] = useState("");
     const [fontScale, setFontScale] = useState(1);
     const [textWrap, setTextWrap] = useState(true);
+    const [textAnimId, setTextAnimId] = useState<string>("none");
     const [thumbnails, setThumbnails] = useState<string[]>([]);
     const generated = useRef(false);
 
@@ -77,9 +78,9 @@ export default function PatternSelector({
 
     const handleTextRender = useCallback(() => {
         if (textInput.trim()) {
-            onRenderText(textInput.trim(), activeColor, fontScale, textWrap);
+            onRenderText(textInput.trim(), activeColor, fontScale, textWrap, textAnimId);
         }
-    }, [textInput, activeColor, onRenderText, fontScale, textWrap]);
+    }, [textInput, activeColor, onRenderText, fontScale, textWrap, textAnimId]);
 
     const handleKeyDown = useCallback(
         (e: React.KeyboardEvent) => {
@@ -266,6 +267,31 @@ export default function PatternSelector({
                             >
                                 Overflow
                             </button>
+                        </div>
+                        {/* Animation Select */}
+                        <div className="mt-2 flex flex-col gap-1.5">
+                            <span className="text-[10px] text-white/40">Animation</span>
+                            <div className="flex gap-1 overflow-x-auto pb-1 custom-scrollbar">
+                                {[
+                                    { id: "none", label: "None" },
+                                    { id: "Text Marquee", label: "Marquee" },
+                                    { id: "Typewriter", label: "Typewriter" },
+                                    { id: "Blink Text", label: "Blink" },
+                                    { id: "Rainbow Text", label: "Rainbow" }
+                                ].map(anim => (
+                                    <button
+                                        key={anim.id}
+                                        onClick={() => setTextAnimId(anim.id)}
+                                        className={`shrink-0 rounded px-1.5 py-1 text-[10px] transition ${
+                                            textAnimId === anim.id
+                                                ? "bg-green-500/30 text-green-300 ring-1 ring-green-500/50"
+                                                : "bg-white/5 text-white/70 hover:bg-white/10"
+                                        }`}
+                                    >
+                                        {anim.label}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </div>

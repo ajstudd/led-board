@@ -107,16 +107,19 @@ function scrollLeftTick(
   data: Uint8ClampedArray,
   frame: number,
 ) {
-  if (!snapshot) return;
-  const offset = frame % cols;
+  const buf = getMarqueeBuffer() || snapshot;
+  const bufCols = getMarqueeBuffer() ? getMarqueeBufferCols() : cols;
+  if (!buf) return;
+
+  const offset = frame % bufCols;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const srcCol = (c + offset) % cols;
-      const si = (r * cols + srcCol) * 3;
+      const srcCol = (c + offset) % bufCols;
+      const si = (r * bufCols + srcCol) * 3;
       const di = (r * cols + c) * 3;
-      data[di] = snapshot[si];
-      data[di + 1] = snapshot[si + 1];
-      data[di + 2] = snapshot[si + 2];
+      data[di] = buf[si];
+      data[di + 1] = buf[si + 1];
+      data[di + 2] = buf[si + 2];
     }
   }
 }
@@ -131,16 +134,19 @@ function scrollRightTick(
   data: Uint8ClampedArray,
   frame: number,
 ) {
-  if (!snapshot) return;
-  const offset = frame % cols;
+  const buf = getMarqueeBuffer() || snapshot;
+  const bufCols = getMarqueeBuffer() ? getMarqueeBufferCols() : cols;
+  if (!buf) return;
+
+  const offset = frame % bufCols;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const srcCol = (((c - offset) % cols) + cols) % cols;
-      const si = (r * cols + srcCol) * 3;
+      const srcCol = (((c - offset) % bufCols) + bufCols) % bufCols;
+      const si = (r * bufCols + srcCol) * 3;
       const di = (r * cols + c) * 3;
-      data[di] = snapshot[si];
-      data[di + 1] = snapshot[si + 1];
-      data[di + 2] = snapshot[si + 2];
+      data[di] = buf[si];
+      data[di + 1] = buf[si + 1];
+      data[di + 2] = buf[si + 2];
     }
   }
 }
@@ -590,6 +596,9 @@ export function setMarqueeBuffer(
   marqueeBuffer = buffer;
   marqueeBufCols = bufferCols;
 }
+
+export function getMarqueeBuffer() { return marqueeBuffer; }
+export function getMarqueeBufferCols() { return marqueeBufCols; }
 
 function marqueeTextTick(
   cols: number,
