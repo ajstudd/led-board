@@ -600,6 +600,238 @@ export const EFFECT_PRESETS: EffectPreset[] = [
     },
     hueShift: (dist, age) => dist * 25 + age * 10,
   },
+
+  // 14. Neon — intense saturated glow with wide soft halo
+  {
+    name: "Neon",
+    maxAge: 60,
+    maxRadius: 24,
+    intensity: (_dx, _dy, dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const radius = Math.min(progress * 2, 1) * maxRadius;
+      if (dist > radius * 2.5) return 0;
+      const fade = 1 - Math.pow(progress, 0.3);
+
+      // Intense core glow
+      let core = 0;
+      if (dist < radius) {
+        core = Math.pow(1 - dist / radius, 4) * 1.0;
+      }
+
+      // Wide soft secondary halo
+      const haloRadius = radius * 2.5;
+      let halo = 0;
+      if (dist < haloRadius) {
+        halo = Math.pow(1 - dist / haloRadius, 1.5) * 0.4;
+      }
+
+      // Pulsing flicker
+      const pulse = 0.85 + 0.15 * Math.sin(age * 0.6 + dist * 0.8);
+
+      return Math.min(1, (core + halo) * fade * pulse);
+    },
+    hueShift: (dist, age) => dist * 5 + age * 3,
+  },
+
+  // 15. Trail — thick drag trail that dissolves into sparkling embers
+  {
+    name: "Trail",
+    maxAge: 45,
+    maxRadius: 12,
+    intensity: (dx, dy, dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const currentRadius = Math.max(1, maxRadius * (1 - progress * 0.7));
+      if (dist > currentRadius) return 0;
+      const fade = 1 - Math.pow(progress, 0.5);
+
+      // Core trail — thick and bright
+      const trailWidth = currentRadius * (1 - progress * 0.5);
+      let trailI = 0;
+      if (dist < trailWidth) {
+        trailI = (1 - dist / trailWidth) * fade;
+      }
+
+      // Ember phase — trail breaks apart after 40% lifetime
+      let emberI = 0;
+      if (progress > 0.4) {
+        const emberPhase = (progress - 0.4) / 0.6;
+        const hash = Math.sin(dx * 127.1 + dy * 311.7 + age * 17.3) * 43758.5453;
+        const sparkle = hash - Math.floor(hash);
+        if (sparkle > 0.7 && dist < currentRadius * 1.5) {
+          const twinkle = (Math.sin(age * 2.0 + dist * 3.0 + sparkle * 20.0) + 1) / 2;
+          emberI = twinkle * (1 - emberPhase) * 0.8;
+        }
+      }
+
+      return Math.min(1, Math.max(trailI, emberI));
+    },
+    hueShift: (dist, age) => dist * 8 + age * 6,
+  },
+
+  // 16. Black Hole — dark core with super-bright spinning accretion disk
+  {
+    name: "Black Hole",
+    maxAge: 70,
+    maxRadius: 20,
+    intensity: (dx, dy, dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const outerRadius = Math.min(progress * 2, 1) * maxRadius;
+      if (dist > outerRadius + 2) return 0;
+      const fade = 1 - Math.pow(progress, 0.5);
+
+      // Dark core — draws nothing (intensity 0)
+      const coreRadius = outerRadius * 0.25;
+      if (dist < coreRadius) return 0;
+
+      // Event horizon glow — thin bright ring at the edge of the core
+      const horizonWidth = 1.5;
+      const horizonDist = Math.abs(dist - coreRadius);
+      let horizonI = 0;
+      if (horizonDist < horizonWidth) {
+        horizonI = Math.pow(1 - horizonDist / horizonWidth, 2) * 0.9;
+      }
+
+      // Spinning accretion disk — logarithmic spiral arms
+      const angle = Math.atan2(dy, dx);
+      const rotation = age * 0.4; // fast spin
+      const spiralAngle = angle + rotation + Math.log(dist + 1) * 1.5;
+      const numArms = 3;
+      const armValue = (Math.cos(spiralAngle * numArms) + 1) / 2;
+      const diskI = Math.pow(armValue, 2) * 0.7;
+
+      // Radial brightness — brighter near the core edge, dimmer outward
+      const radialFade = dist < outerRadius
+        ? 0.3 + 0.7 * (1 - (dist - coreRadius) / (outerRadius - coreRadius))
+        : 0;
+
+      // Outer rim glow
+      const rimDist = Math.abs(dist - outerRadius);
+      const rimI = rimDist < 2 ? (1 - rimDist / 2) * 0.3 : 0;
+
+      return Math.min(1, (horizonI + diskI * radialFade + rimI) * fade);
+    },
+    hueShift: (dist, age) => -dist * 15 + age * 12,
+  },
+
+  // 17. Supernova — charging core that erupts into shockwave + nebula
+  {
+    name: "Supernova",
+    maxAge: 65,
+    maxRadius: 28,
+    intensity: (_dx, _dy, dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const fade = 1 - Math.pow(progress, 0.4);
+
+      // Phase 1: charging core (0–20%)
+      if (progress < 0.2) {
+        const chargeP = progress / 0.2;
+        const chargeRadius = 2 + chargeP * 3;
+        if (dist > chargeRadius) return 0;
+        const pulse = 0.6 + 0.4 * Math.sin(age * 2.0);
+        return (1 - dist / chargeRadius) * chargeP * pulse;
+      }
+
+      // Phase 2: explosion shockwave (20–50%)
+      const explosionP = Math.max(0, (progress - 0.2) / 0.3);
+      let shockI = 0;
+      if (explosionP > 0 && explosionP < 1) {
+        const shockRadius = explosionP * maxRadius;
+        const shockWidth = 2 + explosionP * 3;
+        const shockDist = Math.abs(dist - shockRadius);
+        if (shockDist < shockWidth) {
+          const edge = 1 - shockDist / shockWidth;
+          const isOuter = dist > shockRadius;
+          shockI = isOuter
+            ? Math.pow(edge, 1.5) * (1 - explosionP * 0.5)
+            : Math.pow(edge, 0.8) * 0.4 * (1 - explosionP * 0.5);
+        }
+      }
+
+      // Phase 3: nebula cloud texture (30–100%)
+      let nebulaI = 0;
+      if (progress > 0.3) {
+        const nebulaP = (progress - 0.3) / 0.7;
+        const nebulaRadius = maxRadius * Math.min(nebulaP * 2, 1);
+        if (dist < nebulaRadius) {
+          // Multi-octave noise using sine
+          const t = age * 0.08;
+          const n1 = Math.sin(dist * 0.6 + t) * Math.cos(dist * 0.4 - t * 0.7);
+          const n2 = Math.sin(dist * 1.2 - t * 1.5) * 0.5;
+          const noise = (n1 + n2 + 1.5) / 3;
+          const distFade = 1 - Math.pow(dist / nebulaRadius, 2);
+          nebulaI = noise * distFade * (1 - nebulaP * 0.6) * 0.6;
+        }
+      }
+
+      return Math.min(1, (shockI + nebulaI) * fade);
+    },
+    hueShift: (dist, age) => dist * 12 + age * 10,
+  },
+
+  // 18. Chromatic Aberration (Glitch) — RGB channel splitting with static
+  {
+    name: "Glitch",
+    maxAge: 30,
+    maxRadius: 16,
+    intensity: (dx, dy, dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const radius = Math.min(progress * 3, 1) * maxRadius;
+      if (dist > radius) return 0;
+      const fade = 1 - Math.pow(progress, 0.6);
+
+      // Main glitch block — rectangular regions that shift
+      const blockY = Math.floor(dy / 2) * 2;
+      const glitchOffset = Math.sin(blockY * 3.7 + age * 8.0) * 3;
+      const glitchedDx = dx + glitchOffset;
+      const glitchedDist = Math.sqrt(glitchedDx * glitchedDx + dy * dy);
+
+      let intensity = 0;
+      if (glitchedDist < radius) {
+        intensity = (1 - glitchedDist / radius) * 0.7;
+      }
+
+      // Static noise overlay
+      const staticHash = Math.sin(dx * 87.3 + dy * 241.9 + age * 157.7) * 43758.5453;
+      const staticVal = staticHash - Math.floor(staticHash);
+      if (staticVal > 0.92 && dist < radius) {
+        intensity = Math.max(intensity, 0.8);
+      }
+
+      // Scanline effect — horizontal lines
+      const scanline = Math.abs(Math.sin(dy * 3.14159)) > 0.7 ? 1.0 : 0.6;
+
+      return Math.min(1, intensity * fade * scanline);
+    },
+    hueShift: (dist, age) => dist * 40 + age * 25,
+  },
+
+  // 19. Quantum Foam — chaotic boiling micro-bubbles
+  {
+    name: "Quantum Foam",
+    maxAge: 40,
+    maxRadius: 14,
+    intensity: (dx, dy, dist, age, maxAge, maxRadius) => {
+      const progress = age / maxAge;
+      const radius = Math.min(progress * 2.5, 1) * maxRadius;
+      if (dist > radius) return 0;
+      const fade = 1 - Math.pow(progress, 0.5);
+
+      const t = age * 0.3;
+
+      // Multiple overlapping high-frequency wave fields
+      const f1 = Math.sin(dx * 3.5 + t * 2.1) * Math.cos(dy * 2.8 - t * 1.7);
+      const f2 = Math.sin((dx + dy) * 2.0 + t * 3.3) * Math.cos(dist * 1.8 - t * 0.9);
+      const f3 = Math.sin(dx * 1.5 - dy * 4.2 + t * 1.5) * Math.sin(dist * 3.0 + t * 2.5);
+
+      // Combine fields — sharp threshold creates bubble-like patterns
+      const combined = (f1 + f2 + f3 + 3) / 6; // 0..1
+      const sharpened = combined > 0.55 ? Math.pow((combined - 0.55) / 0.45, 0.5) : 0;
+
+      const distFade = 1 - Math.pow(dist / radius, 1.5);
+      return Math.min(1, sharpened * fade * distFade * 1.2);
+    },
+    hueShift: (dist, age) => dist * 20 + age * 18,
+  },
 ];
 
 // ── Active Effect Instance ────────────────────────────
@@ -658,7 +890,7 @@ export interface EffectsOverlay {
 
 export class EffectsEngine {
   private effects: ActiveEffect[] = [];
-  private _enabled = false;
+  private _enabled = true;
   private _preset: EffectPreset = EFFECT_PRESETS[0];
   private _cols = 0;
   private _rows = 0;

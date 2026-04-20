@@ -54,7 +54,7 @@ export default function LEDBoard() {
     const snapshotRef = useRef<Uint8ClampedArray | null>(null);
 
     // ── Effects state ──────────────────────────────────
-    const [effectsEnabled, setEffectsEnabled] = useState(false);
+    const [effectsEnabled, setEffectsEnabled] = useState(true);
     const [activeEffectPreset, setActiveEffectPreset] = useState<EffectPreset>(EFFECT_PRESETS[0]);
     const [effectsDistance, setEffectsDistance] = useState(1);
     const [effectsSpeed, setEffectsSpeed] = useState(1);
@@ -178,7 +178,10 @@ export default function LEDBoard() {
         // Restore saved preferences
         try {
             const savedEnabled = localStorage.getItem(STORAGE_KEY_EFFECTS);
-            if (savedEnabled === "true") {
+            if (savedEnabled === "false") {
+                engine.setEnabled(false);
+                queueMicrotask(() => setEffectsEnabled(false));
+            } else {
                 engine.setEnabled(true);
                 queueMicrotask(() => setEffectsEnabled(true));
             }

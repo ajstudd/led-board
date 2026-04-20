@@ -454,6 +454,155 @@ float intensityButterfly(float dx, float dy, float dist, float age, float maxAge
   return mx;
 }
 
+// ── Preset 13: Neon — intense glow with wide soft halo ──────
+float intensityNeon(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float radius = min(progress * 2.0, 1.0) * maxRadius;
+  if (dist > radius * 2.5) return 0.0;
+  float fade = 1.0 - pow(progress, 0.3);
+  float core = 0.0;
+  if (dist < radius) {
+    core = pow(1.0 - dist / radius, 4.0);
+  }
+  float haloR = radius * 2.5;
+  float halo = 0.0;
+  if (dist < haloR) {
+    halo = pow(1.0 - dist / haloR, 1.5) * 0.4;
+  }
+  float pulse = 0.85 + 0.15 * sin(age * 0.6 + dist * 0.8);
+  return min(1.0, (core + halo) * fade * pulse);
+}
+
+// ── Preset 14: Trail — dissolving ember trail ───────────────
+float intensityTrail(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float currentR = max(1.0, maxRadius * (1.0 - progress * 0.7));
+  if (dist > currentR) return 0.0;
+  float fade = 1.0 - pow(progress, 0.5);
+  float trailW = currentR * (1.0 - progress * 0.5);
+  float trailI = 0.0;
+  if (dist < trailW) {
+    trailI = (1.0 - dist / trailW) * fade;
+  }
+  float emberI = 0.0;
+  if (progress > 0.4) {
+    float ep = (progress - 0.4) / 0.6;
+    float hash = sin(dx * 127.1 + dy * 311.7 + age * 17.3) * 43758.5453;
+    float sparkle = fract(hash);
+    if (sparkle > 0.7 && dist < currentR * 1.5) {
+      float twinkle = (sin(age * 2.0 + dist * 3.0 + sparkle * 20.0) + 1.0) / 2.0;
+      emberI = twinkle * (1.0 - ep) * 0.8;
+    }
+  }
+  return min(1.0, max(trailI, emberI));
+}
+
+// ── Preset 15: Black Hole — dark core + spinning accretion disk ─
+float intensityBlackHole(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float outerR = min(progress * 2.0, 1.0) * maxRadius;
+  if (dist > outerR + 2.0) return 0.0;
+  float fade = 1.0 - pow(progress, 0.5);
+  float coreR = outerR * 0.25;
+  if (dist < coreR) return 0.0;
+  float horizonW = 1.5;
+  float horizonD = abs(dist - coreR);
+  float horizonI = 0.0;
+  if (horizonD < horizonW) {
+    horizonI = pow(1.0 - horizonD / horizonW, 2.0) * 0.9;
+  }
+  float angle = atan(dy, dx);
+  float rotation = age * 0.4;
+  float spiralA = angle + rotation + log(dist + 1.0) * 1.5;
+  float armVal = (cos(spiralA * 3.0) + 1.0) / 2.0;
+  float diskI = pow(armVal, 2.0) * 0.7;
+  float radialFade = dist < outerR ? 0.3 + 0.7 * (1.0 - (dist - coreR) / max(outerR - coreR, 0.01)) : 0.0;
+  float rimD = abs(dist - outerR);
+  float rimI = rimD < 2.0 ? (1.0 - rimD / 2.0) * 0.3 : 0.0;
+  return min(1.0, (horizonI + diskI * radialFade + rimI) * fade);
+}
+
+// ── Preset 16: Supernova — charge → shockwave → nebula ──────
+float intensitySupernova(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float fade = 1.0 - pow(progress, 0.4);
+  if (progress < 0.2) {
+    float cp = progress / 0.2;
+    float cr = 2.0 + cp * 3.0;
+    if (dist > cr) return 0.0;
+    float pulse = 0.6 + 0.4 * sin(age * 2.0);
+    return (1.0 - dist / cr) * cp * pulse;
+  }
+  float ep = max(0.0, (progress - 0.2) / 0.3);
+  float shockI = 0.0;
+  if (ep > 0.0 && ep < 1.0) {
+    float sr = ep * maxRadius;
+    float sw = 2.0 + ep * 3.0;
+    float sd = abs(dist - sr);
+    if (sd < sw) {
+      float edge = 1.0 - sd / sw;
+      if (dist > sr) {
+        shockI = pow(edge, 1.5) * (1.0 - ep * 0.5);
+      } else {
+        shockI = pow(edge, 0.8) * 0.4 * (1.0 - ep * 0.5);
+      }
+    }
+  }
+  float nebulaI = 0.0;
+  if (progress > 0.3) {
+    float np = (progress - 0.3) / 0.7;
+    float nr = maxRadius * min(np * 2.0, 1.0);
+    if (dist < nr) {
+      float t = age * 0.08;
+      float n1 = sin(dist * 0.6 + t) * cos(dist * 0.4 - t * 0.7);
+      float n2 = sin(dist * 1.2 - t * 1.5) * 0.5;
+      float noise = (n1 + n2 + 1.5) / 3.0;
+      float df = 1.0 - pow(dist / nr, 2.0);
+      nebulaI = noise * df * (1.0 - np * 0.6) * 0.6;
+    }
+  }
+  return min(1.0, (shockI + nebulaI) * fade);
+}
+
+// ── Preset 17: Glitch — chromatic aberration + static ───────
+float intensityGlitch(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float radius = min(progress * 3.0, 1.0) * maxRadius;
+  if (dist > radius) return 0.0;
+  float fade = 1.0 - pow(progress, 0.6);
+  float blockY = floor(dy / 2.0) * 2.0;
+  float glitchOff = sin(blockY * 3.7 + age * 8.0) * 3.0;
+  float gdx = dx + glitchOff;
+  float gDist = sqrt(gdx * gdx + dy * dy);
+  float inten = 0.0;
+  if (gDist < radius) {
+    inten = (1.0 - gDist / radius) * 0.7;
+  }
+  float sh = sin(dx * 87.3 + dy * 241.9 + age * 157.7) * 43758.5453;
+  float sv = fract(sh);
+  if (sv > 0.92 && dist < radius) {
+    inten = max(inten, 0.8);
+  }
+  float scanline = abs(sin(dy * 3.14159)) > 0.7 ? 1.0 : 0.6;
+  return min(1.0, inten * fade * scanline);
+}
+
+// ── Preset 18: Quantum Foam — chaotic boiling micro-bubbles ─
+float intensityQuantumFoam(float dx, float dy, float dist, float age, float maxAge, float maxRadius) {
+  float progress = age / maxAge;
+  float radius = min(progress * 2.5, 1.0) * maxRadius;
+  if (dist > radius) return 0.0;
+  float fade = 1.0 - pow(progress, 0.5);
+  float t = age * 0.3;
+  float f1 = sin(dx * 3.5 + t * 2.1) * cos(dy * 2.8 - t * 1.7);
+  float f2 = sin((dx + dy) * 2.0 + t * 3.3) * cos(dist * 1.8 - t * 0.9);
+  float f3 = sin(dx * 1.5 - dy * 4.2 + t * 1.5) * sin(dist * 3.0 + t * 2.5);
+  float combined = (f1 + f2 + f3 + 3.0) / 6.0;
+  float sharpened = combined > 0.55 ? pow((combined - 0.55) / 0.45, 0.5) : 0.0;
+  float df = 1.0 - pow(dist / radius, 1.5);
+  return min(1.0, sharpened * fade * df * 1.2);
+}
+
 // ── Compute hue-shift value per preset ──────────────────────
 vec2 hueShiftForPreset(int preset, float dist, float age) {
   if (preset == 0) return vec2(1.0, dist * 8.0);
@@ -469,6 +618,12 @@ vec2 hueShiftForPreset(int preset, float dist, float age) {
   if (preset == 10) return vec2(1.0, dist * 10.0 + age * 15.0);
   if (preset == 11) return vec2(1.0, dist * 12.0 + age * 8.0);
   if (preset == 12) return vec2(1.0, dist * 25.0 + age * 10.0);
+  if (preset == 13) return vec2(1.0, dist * 5.0 + age * 3.0);
+  if (preset == 14) return vec2(1.0, dist * 8.0 + age * 6.0);
+  if (preset == 15) return vec2(1.0, -dist * 15.0 + age * 12.0);
+  if (preset == 16) return vec2(1.0, dist * 12.0 + age * 10.0);
+  if (preset == 17) return vec2(1.0, dist * 40.0 + age * 25.0);
+  if (preset == 18) return vec2(1.0, dist * 20.0 + age * 18.0);
   return vec2(0.0, 0.0);
 }
 
@@ -487,6 +642,12 @@ float computeIntensity(int preset, float dx, float dy, float dist, float age, fl
   if (preset == 10) return intensityPlasma(dx, dy, dist, age, maxAge, maxRadius);
   if (preset == 11) return intensityShockwave(dx, dy, dist, age, maxAge, maxRadius);
   if (preset == 12) return intensityButterfly(dx, dy, dist, age, maxAge, maxRadius);
+  if (preset == 13) return intensityNeon(dx, dy, dist, age, maxAge, maxRadius);
+  if (preset == 14) return intensityTrail(dx, dy, dist, age, maxAge, maxRadius);
+  if (preset == 15) return intensityBlackHole(dx, dy, dist, age, maxAge, maxRadius);
+  if (preset == 16) return intensitySupernova(dx, dy, dist, age, maxAge, maxRadius);
+  if (preset == 17) return intensityGlitch(dx, dy, dist, age, maxAge, maxRadius);
+  if (preset == 18) return intensityQuantumFoam(dx, dy, dist, age, maxAge, maxRadius);
   return 0.0;
 }
 
