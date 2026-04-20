@@ -23,6 +23,16 @@ export function useLayerManager(onRedraw: () => void, saveToStorage: () => void)
         }
     }, [onRedraw]);
 
+    const replaceManager = useCallback((viewportWidth: number, viewportHeight: number, cellSize: number) => {
+        managerRef.current?.destroy();
+        managerRef.current = new LayerManager(viewportWidth, viewportHeight, cellSize, onRedraw);
+        undoStackRef.current = [];
+        setCanUndo(false);
+        setLayerUpdateTick(v => v + 1);
+        onRedraw();
+        saveToStorage();
+    }, [onRedraw, saveToStorage]);
+
     const handleLayerChange = useCallback(() => {
         setLayerUpdateTick(v => v + 1);
         onRedraw();
@@ -66,6 +76,7 @@ export function useLayerManager(onRedraw: () => void, saveToStorage: () => void)
         managerRef,
         layerUpdateTick,
         initManager,
+        replaceManager,
         handleLayerChange,
         pushUndo,
         popUndo,

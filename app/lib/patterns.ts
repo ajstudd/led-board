@@ -1,4 +1,5 @@
 import { RGB } from "../types";
+import { randomInt } from "./seededRng";
 import { hslToRgb } from "./utils";
 
 // ── Helper: set cell in flat array ────────────────────
@@ -77,7 +78,7 @@ export function randomNoise(
   data: Uint8ClampedArray,
 ) {
   for (let i = 0; i < data.length; i++) {
-    data[i] = Math.floor(Math.random() * 256);
+    data[i] = randomInt(256);
   }
 }
 

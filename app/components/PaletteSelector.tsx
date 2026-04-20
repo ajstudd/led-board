@@ -13,14 +13,12 @@ interface PaletteSelectorProps {
   activePaletteId: string | null;
   onSelectPalette: (id: string | null) => void;
   activeColor: RGB;
-  onApplyPaletteToBoard?: () => void;
 }
 
 export default function PaletteSelector({
   activePaletteId,
   onSelectPalette,
   activeColor,
-  onApplyPaletteToBoard,
 }: PaletteSelectorProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const palettes = useMemo(() => getAllPalettes(), [refreshKey]);
@@ -80,15 +78,6 @@ export default function PaletteSelector({
             </ul>
           </InfoTooltip>
         </div>
-        {activePaletteId && onApplyPaletteToBoard && (
-          <button
-            onClick={onApplyPaletteToBoard}
-            className="text-[9px] text-green-400 hover:text-green-300 transition px-1.5 py-0.5 rounded bg-green-500/10 border border-green-500/20"
-            title="Apply colors to current board"
-          >
-            Apply to Board
-          </button>
-        )}
       </div>
 
       {/* Palette list — names only, no swatches */}

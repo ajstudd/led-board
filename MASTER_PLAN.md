@@ -1229,25 +1229,97 @@ These root-level `.md` files are planning artifacts, not source code. They shoul
 
 ### Remaining Work
 
-#### 1A. Finish LEDBoard.tsx Rewiring
+> **UI/Product Addendum (April 20, 2026):** Before moving to Phase 2, Phase 1 now also includes sidebar and layer-workflow polish. This addendum supersedes older assumptions that `Clear` should fully reset the app.
 
-**File:** `app/components/LEDBoard.tsx`
+**New immediate priorities:**
+- Simplify the sidebar so each top-level dropdown opens directly into real controls with no second nested disclosure step
+- Restyle the Layers section so it matches the main panel theme
+- Remove the unnecessary `Apply to Board` palette action
+- Improve automatic layer naming so new and duplicated layers get sensible unique names
+- Add explicit layer order controls (`Bring Forward` / `Send Back`)
+- Add a `Select` tool so clicking visible content on the canvas activates the owning layer
+- Split destructive actions into `Clear Canvas` and `Reset Workspace`
+- Redesign the recording dropdown presentation to match the product theme and reduce icon noise
 
-The `effectsOverlayRef` in the session recording hook's `getGridData` callback (around line 136) still references the old single overlay. It needs to use `manager.compositeEffectsOverlay()` instead:
+#### 1A. Fix Per-Layer Animation Runtime Isolation
 
-```typescript
-// BEFORE (in useSessionRecording's getGridData):
-const overlay = effectsOverlayRef.current;
+**Files:** `app/lib/animations.ts`, `app/lib/animation.ts`, `app/lib/textAnimations.ts`, `app/lib/layerManager.ts`, `app/components/LEDBoard.tsx`
 
-// AFTER:
-const overlay = manager.compositeEffectsOverlay();
-```
+**Critical bug:** Multiple layers are still not truly independent because animation runtime state is still partially global:
+- The content animation snapshot in `animations.ts` is module-global
+- The marquee text buffer in `animations.ts` is module-global
+- `LEDBoard.tsx` still treats the active layer's animation snapshot as a shared operational buffer in too many places
 
-The `handleAnimPlay` and `handleAnimFpsChange` callbacks already work because they go through `animRef.current`, which points to the active layer. No change needed.
+**Required fix:**
+- Move animation runtime state to the layer / manager level
+- Each `AnimationManager` must render from its own runtime context
+- Each layer must own its own snapshot buffer, marquee buffer, and marquee buffer width
+- Switching the active layer must only change which layer the UI edits, not which runtime other visible layers render from
+
+**Target result:** Layer A can run animation X while Layer B runs animation Y and both remain visible and correct at the same time.
+
+> **Superseding Note (April 20, 2026):** The remaining Phase 1 work below should now be interpreted through the lens of full layer independence. In practical terms this means:
+> - the selected layer is an editor target only
+> - visible non-active layers must keep rendering their own animation/effects unchanged
+> - each layer must own its own snapshot / marquee animation runtime
+> - hide/show state must affect live composite, live overlay composite, and export
+> - PNG / SVG / GIF / WebM export must match the visible on-screen composite, not just the active layer
+
+**Status (April 20, 2026):** Implemented. Animation snapshot and marquee runtime now live per layer, visible layers composite together, and export uses the visible composite path.
+
+#### 1B. Sidebar / Control Panel Cleanup
+
+**Files:** `app/components/ControlPanel.tsx`, `app/components/LayerPanel.tsx`, `app/components/PatternSelector.tsx`, `app/components/AnimationPanel.tsx`, `app/components/EffectsPanel.tsx`, `app/components/RecordingPanel.tsx`, `app/components/PaletteSelector.tsx`
+
+**Goal:** Make the sidebar feel like one coherent professional control surface instead of nested controls with mismatched visual language.
+
+**Required work:**
+- Restyle `LayerPanel` so it matches the main panel theme instead of using a separate indigo/slate treatment
+- Remove the unnecessary `Apply to Board` action from the palette section
+- Convert nested component-level dropdowns into one-step sections: when a top-level accordion opens, the actual controls should be visible immediately
+- If a section has an enable/disable control, that control should appear at the top of the opened section
+- Redesign the recording section controls to match the rest of the theme; remove decorative icons from the dropdown label and reduce visual noise
+- Keep mobile usability intact while simplifying the hierarchy
+
+#### 1C. Layer Workflow Polish
+
+**Files:** `app/components/LayerPanel.tsx`, `app/components/LEDBoard.tsx`, `app/lib/layerManager.ts`, `app/types/index.ts`
+
+**Goal:** The app should behave like a proper layered editor, not just a stack selector.
+
+**Required work:**
+- Add better automatic layer naming so newly added and duplicated layers get sensible unique names
+- Expose layer ordering controls in the UI (`Bring Forward` / `Send Back`)
+- Add a `Select` tool that lets the user click visible content on the canvas and automatically select the owning layer
+- Layer hit-testing should respect visibility and stack order, choosing the topmost visible non-empty layer at the clicked cell
+- Keep existing hide/show behavior and per-layer status indicators intact
+
+#### 1D. Split Clear Canvas vs Reset Workspace
+
+**Files:** `app/components/ControlPanel.tsx`, `app/components/LEDBoard.tsx`, `app/lib/layerManager.ts`
+
+**Goal:** Separate destructive content clearing from a true first-launch reset.
+
+**Required work:**
+- `Clear Canvas` should clear content buffers and stop active animations/playback without resetting the whole workspace configuration
+- `Reset Workspace` should return the app to a first-launch state: default tool/color/settings, fresh layer stack, cleared recordings, cleared undo/history, and cleared persisted local state
+- Gesture shortcuts and any existing clear-related code paths must be updated to call the intended action explicitly
+
+#### 1E. Verification Steps
+
+1. `npx tsc --noEmit` must pass with zero errors
+2. Open sidebar sections once and confirm controls are immediately visible with no second nested disclosure step
+3. Create 2+ layers and confirm names are unique and ordering controls move layers predictably
+4. Use the `Select` tool on visible content and confirm the topmost owning layer becomes active
+5. Create 2 layers, start different animations on each, and confirm both play simultaneously
+6. Create 2 layers, enable effects on both with different presets, and confirm both render
+7. `Clear Canvas` should clear pixels and stop playback/animations while preserving workspace structure and settings
+8. `Reset Workspace` should return the app to first-launch state
+9. PNG / SVG / GIF / WebM export should match the visible on-screen composite
 
 #### 1B. Update LayerPanel.tsx — Per-Layer Status Indicators
 
-**File:** `app/components/LayerPanel.tsx`
+**File:** `app/components/LEDBoard.tsx`
 
 Add visual indicators to each layer row:
 - `▶` icon (green) if that layer's animation is playing
@@ -1284,13 +1356,15 @@ Check how `Canvas.tsx` accesses the effects overlay and update if needed. The ch
 
 ## Phase 2: Action-Based Recording
 
-> **Status: 📋 Not started**  
+> **Status: 🚧 In progress**  
 > **Depends on:** Phase 1 complete  
 > **Estimated effort:** 3-4 hours
 
 ### Goal
 
-Replace frame-by-frame recording with action-based recording for `.tenix-rec` files. File sizes drop from MBs to KBs (~1000× smaller). Frame-based recording is RETAINED as a fallback for video export.
+Replace frame-by-frame recording with action-based recording for `.tenix-rec` files. File sizes drop from MBs to KBs (~1000× smaller). Frame-based recording is RETAINED as a fallback for video export and can run as a shadow capture while action recording is active.
+
+> **Implementation note (April 20, 2026):** The first production pass uses a full serialized board snapshot at record start plus timed action events afterward. Layer-stack mutations are recorded as full `layer.sync` snapshots instead of fragile incremental add/delete/update diffs, because the current UI lets many layer properties change indirectly. This keeps replay reliable while preserving compact recordings for normal drawing sessions.
 
 ### Architecture
 
@@ -1320,6 +1394,7 @@ type Action =
   | { t: number; type: "effectTrigger"; col: number; row: number; color: [number, number, number]; layerId: string }
   | { t: number; type: "clear" }
   | { t: number; type: "text"; text: string; color: [number, number, number]; scale: number }
+  | { t: number; type: "layer"; action: "sync"; layers: SerializedLayerState[]; activeLayerId: string | null }
   | { t: number; type: "layer"; action: "add" | "delete" | "select"; layerId: string; name?: string }
   | { t: number; type: "palette"; paletteId: string | null }
   | { t: number; type: "tool"; tool: "draw" | "erase" | "fill" | "vibe" }
@@ -1338,7 +1413,16 @@ type Action =
 |---|---|
 | `app/components/LEDBoard.tsx` | Instrument all user actions to emit events to the action recorder |
 | `app/components/RecordingPanel.tsx` | Add toggle between "Action" and "Frame" recording modes |
-| `app/lib/sessionRecorder.ts` | Add import/export support for action-based `.tenix-rec` v3 format |
+| `app/components/ControlPanel.tsx` | Pass recording mode controls through the sidebar |
+| `app/lib/layerManager.ts` | Restore serialized layer stacks for deterministic action replay |
+| `app/lib/animations.ts` / `app/lib/patterns.ts` | Replace non-deterministic random calls with seeded RNG |
+
+### Current Scope
+
+- `.tenix-rec` v3 import/export is handled by `actionRecorder.ts`
+- Frame recording remains the source for GIF/WebM export
+- Action playback restores the layered board state and then reapplies timed actions
+- Imported action recordings do not yet auto-generate a frame cache for GIF/WebM export
 
 ### Critical Implementation Detail: Deterministic Replay
 

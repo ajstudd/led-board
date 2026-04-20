@@ -10,7 +10,6 @@ import {
 } from "react";
 import { LayerManager } from "../lib/layerManager";
 import { DEFAULT_SETTINGS, BoardSettings } from "../types";
-import { EffectsOverlay } from "../lib/effects";
 
 export interface CanvasHandle {
     redraw: () => void;
@@ -19,7 +18,6 @@ export interface CanvasHandle {
 
 interface CanvasProps {
     layerManagerRef: React.RefObject<LayerManager | null>;
-    effectsOverlayRef?: React.RefObject<EffectsOverlay | null>;
     settings?: BoardSettings;
     onCellHover?: (col: number, row: number) => void;
     onCellClick?: (col: number, row: number) => void;
@@ -32,7 +30,6 @@ interface CanvasProps {
 const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
     {
         layerManagerRef,
-        effectsOverlayRef,
         settings = DEFAULT_SETTINGS,
         onCellHover,
         onCellClick,
@@ -158,7 +155,7 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
         }
 
         // -- 5. Effects overlay (ImageData fast-path, additive blend) --
-        const overlay = effectsOverlayRef?.current;
+        const overlay = layerManager.compositeEffectsOverlay();
         if (overlay?.buffer && overlay.cols > 0) {
             let eCanvas = effectsCanvasRef.current;
             if (!eCanvas || eCanvas.width !== overlay.cols || eCanvas.height !== overlay.rows) {
@@ -177,7 +174,7 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
             ctx.drawImage(eCanvas, 0, 0, dw, dh);
             ctx.globalCompositeOperation = "source-over";
         }
-    }, [layerManagerRef, effectsOverlayRef, settings]);
+    }, [layerManagerRef, settings]);
 
     // ── Expose redraw & canvas ref to parent ──────────────
     useImperativeHandle(

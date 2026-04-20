@@ -1,5 +1,6 @@
 // ----- Colour Types -----
 export type RGB = [r: number, g: number, b: number];
+export type LayerBlendMode = "normal" | "add" | "multiply";
 
 export interface Cell {
   col: number;
@@ -23,7 +24,7 @@ export interface GridState {
 }
 
 // ----- Tool Types -----
-export type ToolKind = "draw" | "erase" | "fill" | "vibe";
+export type ToolKind = "select" | "draw" | "erase" | "fill" | "vibe";
 
 export interface Tool {
   kind: ToolKind;
@@ -40,6 +41,12 @@ export interface PatternConfig {
 }
 
 // ----- Animation Types -----
+export interface AnimationRuntimeContext {
+  snapshot: Uint8ClampedArray | null;
+  marqueeBuffer: Uint8ClampedArray | null;
+  marqueeBufferCols: number;
+}
+
 export interface AnimationConfig {
   name: string;
   fps: number;
@@ -49,6 +56,34 @@ export interface AnimationConfig {
     data: Uint8ClampedArray,
     frame: number,
   ) => void;
+}
+
+export interface SerializedLayerEffectsState {
+  enabled: boolean;
+  presetName: string;
+  distanceMultiplier: number;
+  speedMultiplier: number;
+}
+
+export interface SerializedLayerState {
+  id: string;
+  name: string;
+  visible: boolean;
+  opacity: number;
+  blendMode: LayerBlendMode;
+  data: string;
+  effects: SerializedLayerEffectsState;
+}
+
+export interface SerializedBoardState {
+  cols: number;
+  rows: number;
+  cellSize: number;
+  activeLayerId: string | null;
+  activeTool: ToolKind;
+  activeColor: RGB;
+  activePaletteId: string | null;
+  layers: SerializedLayerState[];
 }
 
 // ----- Settings -----

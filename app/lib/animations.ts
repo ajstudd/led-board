@@ -1,4 +1,5 @@
-import { AnimationConfig } from "../types";
+import { AnimationConfig, AnimationRuntimeContext } from "../types";
+import { random, randomInt, randomRange } from "./seededRng";
 import { hslToRgb, hslToRgbInto } from "./utils";
 import { strokeRecorder, StrokeEntry } from "./recorder";
 
@@ -12,16 +13,29 @@ import { strokeRecorder, StrokeEntry } from "./recorder";
  * modified result into the live grid data.
  */
 
-// ── Shared snapshot buffer ────────────────────────────
+// ── Active animation runtime (set by AnimationManager per tick) ──
 let snapshot: Uint8ClampedArray | null = null;
+let marqueeBuffer: Uint8ClampedArray | null = null;
+let marqueeBufCols = 0;
+
+export function setAnimationRuntimeContext(runtime: AnimationRuntimeContext | null): void {
+  snapshot = runtime?.snapshot ?? null;
+  marqueeBuffer = runtime?.marqueeBuffer ?? null;
+  marqueeBufCols = runtime?.marqueeBufferCols ?? 0;
+}
 
 /** Capture (or update) the content snapshot the animations read from */
-export function captureSnapshot(data: Uint8ClampedArray): void {
-  if (!snapshot || snapshot.length !== data.length) {
-    snapshot = new Uint8ClampedArray(data);
+export function captureSnapshot(
+  data: Uint8ClampedArray,
+  runtime: AnimationRuntimeContext,
+): Uint8ClampedArray {
+  if (!runtime.snapshot || runtime.snapshot.length !== data.length) {
+    runtime.snapshot = new Uint8ClampedArray(data);
   } else {
-    snapshot.set(data);
+    runtime.snapshot.set(data);
   }
+
+  return runtime.snapshot;
 }
 
 /** Fast single-pixel update — avoids copying the entire buffer */
@@ -30,11 +44,12 @@ export function updateSnapshotPixel(
   r: number,
   g: number,
   b: number,
+  runtime: AnimationRuntimeContext,
 ): void {
-  if (!snapshot) return;
-  snapshot[idx] = r;
-  snapshot[idx + 1] = g;
-  snapshot[idx + 2] = b;
+  if (!runtime.snapshot) return;
+  runtime.snapshot[idx] = r;
+  runtime.snapshot[idx + 1] = g;
+  runtime.snapshot[idx + 2] = b;
 }
 
 /** Helpers ────────────────────────────────────────────── */
@@ -362,11 +377,11 @@ function sparkleTick(cols: number, rows: number, data: Uint8ClampedArray) {
       const i = (r * cols + c) * 3;
       if (!isLit(snapshot, i)) continue;
 
-      if (Math.random() < 0.08) {
+      if (random() < 0.08) {
         data[i] = 255;
         data[i + 1] = 255;
         data[i + 2] = 255;
-      } else if (Math.random() < 0.05) {
+      } else if (random() < 0.05) {
         data[i] = Math.floor(snapshot[i] * 0.3);
         data[i + 1] = Math.floor(snapshot[i + 1] * 0.3);
         data[i + 2] = Math.floor(snapshot[i + 2] * 0.3);
@@ -393,7 +408,7 @@ function fadeInTick(
   if (frame === 0 || fadeOrder.length !== total) {
     fadeOrder = Array.from({ length: total }, (_, i) => i);
     for (let i = fadeOrder.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = randomInt(i + 1);
       [fadeOrder[i], fadeOrder[j]] = [fadeOrder[j], fadeOrder[i]];
     }
   }
@@ -452,9 +467,9 @@ function matrixRevealTick(
     contentDrops = [];
     for (let c = 0; c < cols; c++) {
       contentDrops.push({
-        y: Math.floor(Math.random() * rows * 2) - rows,
-        speed: 0.3 + Math.random() * 0.7,
-        len: 4 + Math.floor(Math.random() * (rows * 0.3)),
+        y: randomInt(rows * 2) - rows,
+        speed: randomRange(0.3, 1),
+        len: 4 + randomInt(Math.max(1, Math.floor(rows * 0.3))),
       });
     }
   }
@@ -491,9 +506,9 @@ function matrixRevealTick(
     }
 
     if (headRow - drop.len > rows) {
-      drop.y = -Math.floor(Math.random() * rows * 0.3);
-      drop.speed = 0.3 + Math.random() * 0.7;
-      drop.len = 4 + Math.floor(Math.random() * (rows * 0.3));
+      drop.y = -randomInt(Math.max(1, Math.floor(rows * 0.3)));
+      drop.speed = randomRange(0.3, 1);
+      drop.len = 4 + randomInt(Math.max(1, Math.floor(rows * 0.3)));
     }
   }
 }
@@ -585,16 +600,13 @@ function replayReverseTick(
 //  Text Marquee — scrolls overflowing text from right to left
 // ═══════════════════════════════════════════════════════
 
-/** Wide buffer and its column count, set externally by LEDBoard */
-let marqueeBuffer: Uint8ClampedArray | null = null;
-let marqueeBufCols = 0;
-
 export function setMarqueeBuffer(
+  runtime: AnimationRuntimeContext,
   buffer: Uint8ClampedArray | null,
   bufferCols: number = 0,
 ): void {
-  marqueeBuffer = buffer;
-  marqueeBufCols = bufferCols;
+  runtime.marqueeBuffer = buffer;
+  runtime.marqueeBufferCols = buffer ? bufferCols : 0;
 }
 
 export function getMarqueeBuffer() { return marqueeBuffer; }

@@ -2,9 +2,10 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import ControlPanel from "./ControlPanel";
-import { DEFAULT_SETTINGS, AnimationConfig, BoardSettings, RGB, ToolKind } from "../types";
+import { DEFAULT_SETTINGS, AnimationConfig, BoardSettings, RGB, SerializedBoardState, SerializedLayerState, ToolKind } from "../types";
 import { renderTextCentered, renderTextToWideBuffer, measureText } from "../lib/font";
 import { ANIMATIONS, captureSnapshot, setMarqueeBuffer, MARQUEE_ANIMATION } from "../lib/animations";
+import { PATTERNS } from "../lib/patterns";
 import { TEXT_ANIMATIONS } from "../lib/textAnimations";
 import { strokeRecorder } from "../lib/recorder";
 import { base64ToUint8, hslToRgb, uint8ToBase64 } from "../lib/utils";
@@ -12,13 +13,14 @@ import GestureController, { GestureLoadState } from "./GestureController";
 import LEDCanvas, { CanvasHandle } from "./Canvas";
 import { getPaletteById } from "../lib/palette";
 import TimelinePanel from "./TimelinePanel";
-import { EffectPreset } from "../lib/effects";
+import { EffectPreset, EFFECT_PRESETS } from "../lib/effects";
 import { RecordingState, sessionRecorder } from "../lib/sessionRecorder";
+import { actionRecorder, ActionEvent, RecordedActionInput, RecordingMode } from "../lib/actionRecorder";
 import type { LayerManager } from "../lib/layerManager";
+import { createSeed, getSeed, setSeed } from "../lib/seededRng";
 // Custom Hooks
 import { useLayerManager } from "../hooks/useLayerManager";
-import { useAnimationEngine, STORAGE_KEY_ANIM } from "../hooks/useAnimationEngine";
-import { useEffectsEngine } from "../hooks/useEffectsEngine";
+import { STORAGE_KEY_ANIM } from "../hooks/useAnimationEngine";
 import { useSessionRecording } from "../hooks/useSessionRecording";
 import { useGestures } from "../hooks/useGestures";
 import { useTimelineEngine } from "../hooks/useTimelineEngine";
@@ -32,6 +34,38 @@ const STORAGE_KEY_EFFECT_DISTANCE = "tenix-effectDistance";
 const STORAGE_KEY_EFFECT_SPEED = "tenix-effectSpeed";
 const STORAGE_KEY_CELL_SIZE = "tenix-cellSize";
 const MAX_UNDO = 50;
+const PERSISTED_WORKSPACE_KEYS = [
+    STORAGE_KEY_ANIM,
+    STORAGE_KEY_COLOR,
+    STORAGE_KEY_TOOL,
+    STORAGE_KEY_GRID,
+    STORAGE_KEY_SHOW_GRID,
+    STORAGE_KEY_EFFECTS,
+    STORAGE_KEY_EFFECT_PRESET,
+    STORAGE_KEY_EFFECT_DISTANCE,
+    STORAGE_KEY_EFFECT_SPEED,
+    STORAGE_KEY_CELL_SIZE,
+] as const;
+
+function compositeGridWithEffects(manager: LayerManager): Uint8ClampedArray {
+    const raw = manager.composite();
+    const overlay = manager.compositeEffectsOverlay();
+    if (!overlay.buffer || overlay.cols === 0) return raw;
+
+    const len = manager.cols * manager.rows;
+    const out = new Uint8ClampedArray(len * 3);
+    const buf = overlay.buffer;
+
+    for (let i = 0, j = 0; i < len; i++, j += 4) {
+        const si = i * 3;
+        const a = buf[j + 3] / 255;
+        out[si] = Math.min(255, raw[si] + buf[j] * a);
+        out[si + 1] = Math.min(255, raw[si + 1] + buf[j + 1] * a);
+        out[si + 2] = Math.min(255, raw[si + 2] + buf[j + 2] * a);
+    }
+
+    return out;
+}
 
 export default function LEDBoard() {
     const canvasHandleRef = useRef<CanvasHandle>(null);
@@ -63,6 +97,7 @@ export default function LEDBoard() {
         managerRef: layerManagerRef,
         layerUpdateTick,
         initManager: initLayerManager,
+        replaceManager,
         handleLayerChange
     } = useLayerManager(
         useCallback(() => canvasHandleRef.current?.redraw(), []),
@@ -74,14 +109,13 @@ export default function LEDBoard() {
     // When the user switches layers, we update these pointers.
     const animRef = useRef<import('../lib/animation').AnimationManager | null>(null);
     const effectsRef = useRef<import('../lib/effects').EffectsEngine | null>(null);
-    const effectsOverlayRef = useRef<import('../lib/effects').EffectsOverlay | null>(null);
 
     const [animState, setAnimState] = useState<import('../lib/animation').AnimationState>("stopped");
     const [currentAnim, setCurrentAnim] = useState<AnimationConfig | null>(null);
     const [animFps, setAnimFps] = useState(15);
     const [animFrame, setAnimFrame] = useState(0);
     const [effectsEnabled, setEffectsEnabled] = useState(false);
-    const [activeEffectPreset, setActiveEffectPreset] = useState<import('../lib/effects').EffectPreset | null>(null);
+    const [activeEffectPreset, setActiveEffectPreset] = useState<import('../lib/effects').EffectPreset>(EFFECT_PRESETS[0]);
     const [effectsDistance, setEffectsDistance] = useState(1);
     const [effectsSpeed, setEffectsSpeed] = useState(1);
 
@@ -92,7 +126,15 @@ export default function LEDBoard() {
         // Point refs at the active layer's instances
         animRef.current = layer.animation.manager;
         effectsRef.current = layer.effects.engine;
-        effectsOverlayRef.current = layer.effects.overlay;
+        layer.animation.manager.setRuntimeContext(layer.animation);
+        snapshotRef.current = layer.animation.snapshot;
+
+        layer.animation.fps = layer.animation.manager.fps;
+        layer.animation.frame = layer.animation.manager.frame;
+        layer.effects.enabled = layer.effects.engine.enabled;
+        layer.effects.preset = layer.effects.engine.preset;
+        layer.effects.distanceMultiplier = layer.effects.engine.distanceMultiplier;
+        layer.effects.speedMultiplier = layer.effects.engine.speedMultiplier;
         // Sync UI state
         setAnimState(layer.animation.manager.state);
         setCurrentAnim(layer.animation.currentAnim);
@@ -102,6 +144,28 @@ export default function LEDBoard() {
         setActiveEffectPreset(layer.effects.preset);
         setEffectsDistance(layer.effects.distanceMultiplier);
         setEffectsSpeed(layer.effects.speedMultiplier);
+    }, []);
+
+    const getDisplayGridData = useCallback(() => {
+        const manager = layerManagerRef.current;
+        return manager ? compositeGridWithEffects(manager) : null;
+    }, []);
+
+    const captureActiveLayerSnapshot = useCallback((data: Uint8ClampedArray) => {
+        const layer = layerManagerRef.current?.getActiveLayer();
+        if (!layer) return data;
+        const snapshot = captureSnapshot(data, layer.animation);
+        layer.animation.snapshot = snapshot;
+        layer.animation.manager.setRuntimeContext(layer.animation);
+        snapshotRef.current = snapshot;
+        return snapshot;
+    }, []);
+
+    const setActiveLayerMarqueeBuffer = useCallback((buffer: Uint8ClampedArray | null, bufferCols = 0) => {
+        const layer = layerManagerRef.current?.getActiveLayer();
+        if (!layer) return;
+        setMarqueeBuffer(layer.animation, buffer, bufferCols);
+        layer.animation.manager.setRuntimeContext(layer.animation);
     }, []);
 
     const [showPlaybackBar, setShowPlaybackBar] = useState(true);
@@ -128,32 +192,158 @@ export default function LEDBoard() {
     const [layerManagerView, setLayerManagerView] = useState<LayerManager | null>(null);
 
     const {
-        sessionRecRef, recordingState, recFrameCount, recDuration,
-        recPlaybackFrame, recHasRecording, loopEnabled, configureRecorder,
-        handleToggleLoop, setRecordingState, setRecFrameCount, setRecDuration,
-        setRecPlaybackFrame, setRecHasRecording, setLoopEnabled
+        sessionRecRef,
+        recordingState: frameRecordingState,
+        recFrameCount: frameRecFrameCount,
+        recDuration: frameRecDuration,
+        recPlaybackFrame: frameRecPlaybackFrame,
+        recHasRecording: frameRecHasRecording,
+        loopEnabled,
+        setRecordingState: setFrameRecordingState,
+        setRecFrameCount: setFrameRecFrameCount,
+        setRecDuration: setFrameRecDuration,
+        setRecPlaybackFrame: setFrameRecPlaybackFrame,
+        setRecHasRecording: setFrameRecHasRecording,
+        setLoopEnabled,
     } = useSessionRecording({
-        getGridData: useCallback(() => {
-            const manager = layerManagerRef.current;
-            if (!manager) return null;
-            const overlay = effectsOverlayRef.current;
-            const raw = manager.composite();
-            if (!overlay?.buffer || overlay.cols === 0) return raw;
-            const len = manager.cols * manager.rows;
-            const out = new Uint8ClampedArray(len * 3);
-            const buf = overlay.buffer;
-            for (let i = 0, j = 0; i < len; i++, j += 4) {
-                const si = i * 3;
-                const a = buf[j + 3] / 255;
-                out[si] = Math.min(255, raw[si] + buf[j] * a);
-                out[si + 1] = Math.min(255, raw[si + 1] + buf[j + 1] * a);
-                out[si + 2] = Math.min(255, raw[si + 2] + buf[j + 2] * a);
-            }
-            return out;
-        }, []),
+        getGridData: getDisplayGridData,
         onRedraw: useCallback(() => canvasHandleRef.current?.redraw(), []),
         onClearRecordingExt: useCallback(() => {}, [])
     });
+
+    const actionRecRef = useRef(actionRecorder);
+    const isApplyingRecordedActionRef = useRef(false);
+    const restoreAfterActionPlaybackRef = useRef<{ state: SerializedBoardState; seed: number } | null>(null);
+    const [recordingMode, setRecordingMode] = useState<RecordingMode>("action");
+    const [actionRecordingState, setActionRecordingState] = useState<RecordingState>("idle");
+    const [actionCount, setActionCount] = useState(0);
+    const [actionDuration, setActionDuration] = useState(0);
+    const [actionPlaybackIndex, setActionPlaybackIndex] = useState(0);
+    const [actionHasRecording, setActionHasRecording] = useState(false);
+
+    const serializeLayerStack = useCallback((): SerializedLayerState[] => {
+        const manager = layerManagerRef.current;
+        if (!manager) return [];
+
+        return manager.layers.map((layer) => ({
+            id: layer.id,
+            name: layer.name,
+            visible: layer.visible,
+            opacity: layer.opacity,
+            blendMode: layer.blendMode,
+            data: uint8ToBase64(layer.grid.data),
+            effects: {
+                enabled: layer.effects.enabled,
+                presetName: layer.effects.preset.name,
+                distanceMultiplier: layer.effects.distanceMultiplier,
+                speedMultiplier: layer.effects.speedMultiplier,
+            },
+        }));
+    }, []);
+
+    const serializeBoardState = useCallback((): SerializedBoardState => {
+        const manager = layerManagerRef.current;
+        return {
+            cols: manager?.cols ?? gridDims.cols,
+            rows: manager?.rows ?? gridDims.rows,
+            cellSize: manager?.cellSize ?? settings.cellSize,
+            activeLayerId: manager?.activeLayerId ?? null,
+            activeTool,
+            activeColor,
+            activePaletteId,
+            layers: serializeLayerStack(),
+        };
+    }, [activeColor, activePaletteId, activeTool, gridDims.cols, gridDims.rows, serializeLayerStack, settings.cellSize]);
+
+    const recordAction = useCallback((action: RecordedActionInput) => {
+        if (recordingMode !== "action" || isApplyingRecordedActionRef.current) return;
+        const recorder = actionRecRef.current;
+        if (recorder.state !== "recording") return;
+        recorder.record(action);
+        setActionCount(recorder.actionCount);
+        setActionDuration(recorder.duration);
+        setActionHasRecording(recorder.hasRecording);
+    }, [recordingMode]);
+
+    const recordLayerSync = useCallback(() => {
+        const manager = layerManagerRef.current;
+        if (!manager) return;
+        recordAction({
+            type: "layer",
+            action: "sync",
+            layers: serializeLayerStack(),
+            activeLayerId: manager.activeLayerId,
+        });
+    }, [recordAction, serializeLayerStack]);
+
+    const selectLayerRuntime = useCallback((layerId: string | null) => {
+        const manager = layerManagerRef.current;
+        if (!manager || !layerId || manager.activeLayerId === layerId) return;
+        if (!manager.selectLayer(layerId)) return;
+        setLayerManagerView(manager);
+        syncActiveLayerState();
+    }, [syncActiveLayerState]);
+
+    const restoreBoardState = useCallback((state: SerializedBoardState, seed: number) => {
+        setSeed(seed);
+        setSettings((prev) => ({ ...prev, cellSize: state.cellSize }));
+        replaceManager(window.innerWidth, window.innerHeight, state.cellSize);
+
+        const manager = layerManagerRef.current;
+        if (!manager) return;
+
+        if (manager.cols !== state.cols || manager.rows !== state.rows) {
+            manager.resizePreserveDims(state.cols, state.rows);
+        }
+
+        manager.restoreSerializedLayers(state.layers, state.activeLayerId);
+        setActiveTool(state.activeTool);
+        setActiveColor(state.activeColor);
+        setActivePaletteId(state.activePaletteId);
+        setGridDims({ cols: state.cols, rows: state.rows });
+        sessionRecRef.current.updateGrid(state.cols, state.rows);
+
+        snapshotRef.current = null;
+        contentLayersRef.current = [];
+        setCellInfo(null);
+        strokeActiveRef.current = false;
+        gestureStrokeRef.current = false;
+        animWasPlayingBeforePlayback.current = false;
+        undoStackRef.current = [];
+        setCanUndo(false);
+
+        setLayerManagerView(manager);
+        handleLayerChange();
+        syncActiveLayerState();
+        canvasHandleRef.current?.redraw();
+    }, [handleLayerChange, replaceManager, sessionRecRef, syncActiveLayerState]);
+
+    const configureFrameRecorder = useCallback(() => {
+        const recorder = sessionRecRef.current;
+        const manager = layerManagerRef.current;
+        if (!manager) return;
+        recorder.configure({
+            cols: manager.cols,
+            rows: manager.rows,
+            captureFps: 30,
+            getGridData: getDisplayGridData,
+            setGridData: (data: Uint8ClampedArray) => {
+                layerManagerRef.current?.getActiveLayer()?.grid.loadData(data);
+            },
+            redraw: () => canvasHandleRef.current?.redraw(),
+            onStateChange: (state: RecordingState) => {
+                setFrameRecordingState(state);
+                setFrameRecHasRecording(recorder.hasRecording);
+                setFrameRecFrameCount(recorder.frameCount);
+                setFrameRecDuration(recorder.duration);
+            },
+            onPlaybackFrame: (frame: number, total: number) => {
+                setFrameRecPlaybackFrame(frame);
+                setFrameRecFrameCount(total);
+                setFrameRecDuration(recorder.duration);
+            },
+        });
+    }, [getDisplayGridData, sessionRecRef, setFrameRecDuration, setFrameRecFrameCount, setFrameRecHasRecording, setFrameRecPlaybackFrame, setFrameRecordingState]);
 
     const {
         gestureEnabled, gestureVideoRef, gestureLoadState,
@@ -282,7 +472,6 @@ export default function LEDBoard() {
                 }
                 const savedPresetId = localStorage.getItem(STORAGE_KEY_EFFECT_PRESET);
                 if (savedPresetId) {
-                    const { EFFECT_PRESETS } = require('../lib/effects');
                     const match = EFFECT_PRESETS.find((p: { name: string }) => p.name === savedPresetId);
                     if (match) {
                         layer.effects.preset = match;
@@ -319,7 +508,9 @@ export default function LEDBoard() {
     useEffect(() => {
         if (animState !== "playing") return;
         const id = setInterval(() => {
-            if (animRef.current) {
+            const layer = layerManagerRef.current?.getActiveLayer();
+            if (animRef.current && layer) {
+                layer.animation.frame = animRef.current.frame;
                 setAnimFrame(animRef.current.frame);
             }
         }, 200);
@@ -334,7 +525,7 @@ export default function LEDBoard() {
                 const savedColor = localStorage.getItem(STORAGE_KEY_COLOR);
                 if (savedColor) setActiveColor(JSON.parse(savedColor));
                 const savedTool = localStorage.getItem(STORAGE_KEY_TOOL);
-                if (savedTool && ["draw", "erase", "fill"].includes(savedTool)) {
+                if (savedTool && ["select", "draw", "erase", "fill", "vibe"].includes(savedTool)) {
                     setActiveTool(savedTool as ToolKind);
                 }
                 const savedShowGrid = localStorage.getItem(STORAGE_KEY_SHOW_GRID);
@@ -347,16 +538,23 @@ export default function LEDBoard() {
                     if (match) {
                         // Defer animation start until grid + AnimationManager are ready
                         requestAnimationFrame(() => {
-                            const grid = layerManagerRef.current?.getActiveLayer()?.grid;
+                            const activeLayer = layerManagerRef.current?.getActiveLayer();
+                            const grid = activeLayer?.grid;
                             const mgr = animRef.current;
-                            if (!grid || !mgr) return;
+                            if (!grid || !mgr || !activeLayer) return;
                             strokeRecorder.pause();
                             if (!snapshotRef.current) {
                                 snapshotRef.current = grid.cloneData();
                             }
-                            captureSnapshot(snapshotRef.current);
-                            mgr.load(match, grid.cols, grid.rows, grid.data);
+                            setActiveLayerMarqueeBuffer(null);
+                            captureActiveLayerSnapshot(snapshotRef.current);
+                            mgr.load(match, grid.cols, grid.rows, grid.data, activeLayer.animation);
+                            activeLayer.animation.currentAnim = match;
+                            activeLayer.animation.snapshot = snapshotRef.current;
+                            activeLayer.animation.fps = match.fps;
+                            activeLayer.animation.frame = 0;
                             setCurrentAnim(match);
+                            setAnimState("playing");
                             setAnimFps(match.fps);
                             setAnimFrame(0);
                             mgr.play();
@@ -458,13 +656,13 @@ export default function LEDBoard() {
                         textLayer.text, newCols, newRows,
                         textLayer.color, textLayer.scale, baseData,
                     );
-                    setMarqueeBuffer(buffer, bufferCols);
+                    setActiveLayerMarqueeBuffer(buffer, bufferCols);
 
                     // Update snapshot with base pattern
                     const newSnap = new Uint8ClampedArray(newCols * newRows * 3);
                     if (baseData) newSnap.set(baseData);
                     snapshotRef.current = newSnap;
-                    captureSnapshot(snapshotRef.current);
+                    captureActiveLayerSnapshot(snapshotRef.current);
                     grid.loadData(snapshotRef.current);
                 } else {
                     // Text fits or wrap mode — replay normally
@@ -473,12 +671,12 @@ export default function LEDBoard() {
 
                     // If was a marquee but now fits, stop marquee
                     if (animRef.current?.currentAnimation?.name === "Text Marquee") {
-                        setMarqueeBuffer(null);
+                        setActiveLayerMarqueeBuffer(null);
                     }
 
                     if (snapshotRef.current) {
                         snapshotRef.current = buf;
-                        captureSnapshot(snapshotRef.current);
+                        captureActiveLayerSnapshot(snapshotRef.current);
                         grid.loadData(snapshotRef.current);
                     } else {
                         grid.loadData(buf);
@@ -501,7 +699,7 @@ export default function LEDBoard() {
                         }
                     }
                     snapshotRef.current = newSnap;
-                    captureSnapshot(snapshotRef.current);
+                    captureActiveLayerSnapshot(snapshotRef.current);
                 }
             }
 
@@ -517,7 +715,6 @@ export default function LEDBoard() {
                 for (const layer of mgr.layers) {
                     layer.animation.manager.updateGrid(newCols, newRows, layer.grid.data);
                     layer.effects.engine.updateGrid(newCols, newRows);
-                    layer.effects.overlay = layer.effects.engine.overlay;
                 }
             }
             syncActiveLayerState();
@@ -583,24 +780,24 @@ export default function LEDBoard() {
                         textLayer.text, newCols, newRows,
                         textLayer.color, textLayer.scale, baseData,
                     );
-                    setMarqueeBuffer(buffer, bufferCols);
+                    setActiveLayerMarqueeBuffer(buffer, bufferCols);
 
                     const newSnap = new Uint8ClampedArray(newCols * newRows * 3);
                     if (baseData) newSnap.set(baseData);
                     snapshotRef.current = newSnap;
-                    captureSnapshot(snapshotRef.current);
+                    captureActiveLayerSnapshot(snapshotRef.current);
                     resizedGrid.loadData(snapshotRef.current);
                 } else {
                     const buf = new Uint8ClampedArray(newCols * newRows * 3);
                     replayLayers(layers, newCols, newRows, buf);
 
                     if (animRef.current?.currentAnimation?.name === "Text Marquee") {
-                        setMarqueeBuffer(null);
+                        setActiveLayerMarqueeBuffer(null);
                     }
 
                     if (snapshotRef.current) {
                         snapshotRef.current = buf;
-                        captureSnapshot(snapshotRef.current);
+                        captureActiveLayerSnapshot(snapshotRef.current);
                         resizedGrid.loadData(snapshotRef.current);
                     } else {
                         resizedGrid.loadData(buf);
@@ -622,7 +819,7 @@ export default function LEDBoard() {
                         }
                     }
                     snapshotRef.current = newSnap;
-                    captureSnapshot(snapshotRef.current);
+                    captureActiveLayerSnapshot(snapshotRef.current);
                 }
             }
 
@@ -659,6 +856,7 @@ export default function LEDBoard() {
     // ── Tool change handler (auto-enable effects for vibe) ──
     const handleToolChange = useCallback((tool: ToolKind) => {
         setActiveTool(tool);
+        recordAction({ type: "tool", tool });
         if (tool === "vibe" && !effectsEnabled) {
             const layer = layerManagerRef.current?.getActiveLayer();
             if (layer) {
@@ -668,7 +866,25 @@ export default function LEDBoard() {
             setEffectsEnabled(true);
             try { localStorage.setItem(STORAGE_KEY_EFFECTS, "true"); } catch { }
         }
-    }, [effectsEnabled]);
+    }, [effectsEnabled, recordAction]);
+
+    const handleColorChange = useCallback((color: RGB) => {
+        setActiveColor(color);
+        recordAction({ type: "color", color });
+    }, [recordAction]);
+
+    const handlePaletteChange = useCallback((paletteId: string | null) => {
+        setActivePaletteId(paletteId);
+        recordAction({ type: "palette", paletteId });
+    }, [recordAction]);
+
+    const clearPersistedWorkspaceState = useCallback(() => {
+        try {
+            for (const key of PERSISTED_WORKSPACE_KEYS) {
+                localStorage.removeItem(key);
+            }
+        } catch { /* ignore */ }
+    }, []);
 
     // ── Undo helpers ───────────────────────────────────
     const pushUndo = useCallback(() => {
@@ -700,7 +916,7 @@ export default function LEDBoard() {
             } else {
                 snapshotRef.current = new Uint8ClampedArray(prevData);
             }
-            captureSnapshot(snapshotRef.current);
+            captureActiveLayerSnapshot(snapshotRef.current);
             if (animRef.current?.state !== "playing") {
                 grid.loadData(snapshotRef.current);
                 canvasHandleRef.current?.redraw();
@@ -712,46 +928,23 @@ export default function LEDBoard() {
         saveGridToStorage();
     }, [saveGridToStorage]);
 
-    // ── Brand Color Handlers ─────────────────────────────
-    const handleApplyPaletteToBoard = useCallback(() => {
-        if (!activePaletteId) return;
-        const palette = getPaletteById(activePaletteId);
-        if (!palette) return;
-        const grid = layerManagerRef.current?.getActiveLayer()?.grid;
-        if (!grid) return;
+    const handleLayerChangeTracked = useCallback(() => {
+        handleLayerChange();
+        setLayerManagerView(layerManagerRef.current);
+        syncActiveLayerState();
+        recordLayerSync();
+    }, [handleLayerChange, recordLayerSync, syncActiveLayerState]);
 
-        pushUndo();
-
-        const len = grid.cols * grid.rows * 3;
-        for (let i = 0; i < len; i += 3) {
-            const r = grid.data[i];
-            const g = grid.data[i + 1];
-            const b = grid.data[i + 2];
-            if (r === 0 && g === 0 && b === 0) continue; // Skip black/empty pixels
-
-            let bestDist = Infinity;
-            let bestColor = palette.colors[0];
-            for (const pc of palette.colors) {
-                const dr = r - pc[0];
-                const dg = g - pc[1];
-                const db = b - pc[2];
-                const dist = dr * dr + dg * dg + db * db;
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    bestColor = pc;
-                    if (dist === 0) break;
-                }
-            }
-            grid.data[i] = bestColor[0];
-            grid.data[i + 1] = bestColor[1];
-            grid.data[i + 2] = bestColor[2];
-        }
-        canvasHandleRef.current?.redraw();
-        saveGridToStorage();
-    }, [activePaletteId, pushUndo, saveGridToStorage]);
+    const selectLayerAtCell = useCallback((col: number, row: number) => {
+        const manager = layerManagerRef.current;
+        const targetLayer = manager?.pickLayerAt(col, row);
+        if (!manager || !targetLayer || manager.activeLayerId === targetLayer.id) return;
+        manager.selectLayer(targetLayer.id);
+        handleLayerChangeTracked();
+    }, [handleLayerChangeTracked]);
 
     // ── Apply tool to a cell ─────────────────────────────
-    const applyTool = useCallback(
+    const applyToolLegacy = useCallback(
         (col: number, row: number) => {
             const grid = layerManagerRef.current?.getActiveLayer()?.grid;
             if (!grid) return;
@@ -772,6 +965,8 @@ export default function LEDBoard() {
                 const idx = (row * grid.cols + col) * 3;
 
                 switch (activeTool) {
+                    case "select":
+                        break;
                     case "draw":
                         snap[idx] = drawColor[0];
                         snap[idx + 1] = drawColor[1];
@@ -797,7 +992,7 @@ export default function LEDBoard() {
                         grid.loadData(snap);
                         grid.floodFill(col, row, drawColor);
                         snapshotRef.current = grid.cloneData();
-                        captureSnapshot(snapshotRef.current);
+                        captureActiveLayerSnapshot(snapshotRef.current);
                         strokeRecorder.recordBulk(before, snapshotRef.current, grid.cols);
                         break;
                     }
@@ -815,6 +1010,8 @@ export default function LEDBoard() {
             } else {
                 // Normal mode — no animation active
                 switch (activeTool) {
+                    case "select":
+                        break;
                     case "draw":
                         grid.setCell(col, row, drawColor);
                         strokeRecorder.record(col, row, drawColor[0], drawColor[1], drawColor[2]);
@@ -848,27 +1045,162 @@ export default function LEDBoard() {
     );
 
     // ── Hover callback ────────────────────────────────────
+    const applyToolToCell = useCallback(
+        (tool: ToolKind, col: number, row: number, forcedColor?: RGB) => {
+            const grid = layerManagerRef.current?.getActiveLayer()?.grid;
+            if (!grid) return;
+
+            const snap = snapshotRef.current;
+            const selectedColor = forcedColor ?? activeColor;
+            const isMulti = selectedColor[0] === -1;
+            let drawColor: RGB = selectedColor;
+            if (isMulti) {
+                const hue = (performance.now() / 10) % 360;
+                drawColor = hslToRgb(hue, 100, 50);
+            }
+
+            if (snap) {
+                const idx = (row * grid.cols + col) * 3;
+
+                switch (tool) {
+                    case "select":
+                        break;
+                    case "draw":
+                        snap[idx] = drawColor[0];
+                        snap[idx + 1] = drawColor[1];
+                        snap[idx + 2] = drawColor[2];
+                        if (!isApplyingRecordedActionRef.current) {
+                            strokeRecorder.record(col, row, drawColor[0], drawColor[1], drawColor[2]);
+                        }
+                        effectsRef.current?.trigger(col, row, drawColor);
+                        break;
+                    case "erase":
+                        snap[idx] = settings.backgroundColor[0];
+                        snap[idx + 1] = settings.backgroundColor[1];
+                        snap[idx + 2] = settings.backgroundColor[2];
+                        if (!isApplyingRecordedActionRef.current) {
+                            strokeRecorder.record(
+                                col, row,
+                                settings.backgroundColor[0],
+                                settings.backgroundColor[1],
+                                settings.backgroundColor[2],
+                            );
+                        }
+                        effectsRef.current?.trigger(col, row, selectedColor);
+                        break;
+                    case "fill": {
+                        const before = new Uint8ClampedArray(snap);
+                        grid.loadData(snap);
+                        grid.floodFill(col, row, drawColor);
+                        snapshotRef.current = grid.cloneData();
+                        captureActiveLayerSnapshot(snapshotRef.current);
+                        if (!isApplyingRecordedActionRef.current) {
+                            strokeRecorder.recordBulk(before, snapshotRef.current, grid.cols);
+                        }
+                        break;
+                    }
+                    case "vibe":
+                        effectsRef.current?.trigger(col, row, selectedColor);
+                        break;
+                }
+
+                if (animRef.current?.state !== "playing") {
+                    grid.loadData(snapshotRef.current!);
+                    canvasHandleRef.current?.redraw();
+                }
+            } else {
+                switch (tool) {
+                    case "select":
+                        break;
+                    case "draw":
+                        grid.setCell(col, row, drawColor);
+                        if (!isApplyingRecordedActionRef.current) {
+                            strokeRecorder.record(col, row, drawColor[0], drawColor[1], drawColor[2]);
+                        }
+                        effectsRef.current?.trigger(col, row, drawColor);
+                        break;
+                    case "erase":
+                        grid.setCell(col, row, settings.backgroundColor);
+                        if (!isApplyingRecordedActionRef.current) {
+                            strokeRecorder.record(
+                                col, row,
+                                settings.backgroundColor[0],
+                                settings.backgroundColor[1],
+                                settings.backgroundColor[2],
+                            );
+                        }
+                        effectsRef.current?.trigger(col, row, selectedColor);
+                        break;
+                    case "fill": {
+                        const before = grid.cloneData();
+                        grid.floodFill(col, row, drawColor);
+                        if (!isApplyingRecordedActionRef.current) {
+                            strokeRecorder.recordBulk(before, grid.data, grid.cols);
+                        }
+                        break;
+                    }
+                    case "vibe":
+                        effectsRef.current?.trigger(col, row, selectedColor);
+                        break;
+                }
+                canvasHandleRef.current?.redraw();
+            }
+
+            switch (tool) {
+                case "draw":
+                    recordAction({ type: "draw", col, row, color: drawColor });
+                    break;
+                case "erase":
+                    recordAction({ type: "erase", col, row });
+                    break;
+                case "fill":
+                    recordAction({ type: "fill", col, row, color: drawColor });
+                    break;
+                case "vibe": {
+                    const layerId = layerManagerRef.current?.activeLayerId;
+                    if (layerId) {
+                        recordAction({ type: "effectTrigger", layerId, col, row, color: selectedColor });
+                    }
+                    break;
+                }
+            }
+        },
+        [activeColor, captureActiveLayerSnapshot, recordAction, settings.backgroundColor],
+    );
+
+    const applyTool = useCallback((col: number, row: number) => {
+        applyToolToCell(activeTool, col, row);
+    }, [activeTool, applyToolToCell]);
+
     const handleCellHover = useCallback((col: number, row: number) => {
-        const grid = layerManagerRef.current?.getActiveLayer()?.grid;
-        if (!grid) return;
-        setCellInfo({ col, row, color: grid.getCell(col, row) });
-    }, []);
+        const manager = layerManagerRef.current;
+        const activeGrid = manager?.getActiveLayer()?.grid;
+        if (!manager || !activeGrid) return;
+        const pickedLayer = activeTool === "select" ? manager.pickLayerAt(col, row) : null;
+        const color = pickedLayer ? pickedLayer.grid.getCell(col, row) : activeGrid.getCell(col, row);
+        setCellInfo({ col, row, color });
+    }, [activeTool]);
 
     // ── Click callback (applies tool once) ─────────────
     const handleCellClick = useCallback(
         (col: number, row: number) => {
+            if (activeTool === "select") {
+                selectLayerAtCell(col, row);
+                return;
+            }
             if (activeTool !== "vibe" && !strokeActiveRef.current) {
                 pushUndo();
                 strokeActiveRef.current = true;
             }
             applyTool(col, row);
         },
-        [activeTool, applyTool, pushUndo],
+        [activeTool, applyTool, pushUndo, selectLayerAtCell],
     );
 
     // ── Drag callbacks (for draw/erase continuous strokes)
     const handleCellDrag = useCallback(
         (col: number, row: number) => {
+            if (activeTool === "select") return;
             if (activeTool === "fill") return; // fill only on click
             if (activeTool === "vibe") { applyTool(col, row); return; } // vibe triggers effects on drag
             applyTool(col, row);
@@ -887,14 +1219,17 @@ export default function LEDBoard() {
     // Cursor moved (screen pixels from MediaPipe)
     const handleGestureCursorMove = useCallback((x: number, y: number) => {
         setGestureCursorScreen({ x, y });
-        const grid = layerManagerRef.current?.getActiveLayer()?.grid;
-        if (!grid) return;
-        const col = Math.floor(x / grid.cellSize);
-        const row = Math.floor(y / grid.cellSize);
-        if (grid.inBounds(col, row)) {
-            setCellInfo({ col, row, color: grid.getCell(col, row) });
+        const manager = layerManagerRef.current;
+        const activeGrid = manager?.getActiveLayer()?.grid;
+        if (!manager || !activeGrid) return;
+        const col = Math.floor(x / activeGrid.cellSize);
+        const row = Math.floor(y / activeGrid.cellSize);
+        if (activeGrid.inBounds(col, row)) {
+            const pickedLayer = activeTool === "select" ? manager.pickLayerAt(col, row) : null;
+            const color = pickedLayer ? pickedLayer.grid.getCell(col, row) : activeGrid.getCell(col, row);
+            setCellInfo({ col, row, color });
         }
-    }, []);
+    }, [activeTool]);
 
     // Pinch fired at screen (x, y) — click panel elements or draw on canvas
     const handleGesturePinchAt = useCallback(
@@ -924,13 +1259,18 @@ export default function LEDBoard() {
             const row = Math.floor(y / grid.cellSize);
             if (!grid.inBounds(col, row)) return;
 
+            if (activeTool === "select") {
+                selectLayerAtCell(col, row);
+                return;
+            }
+
             if (!gestureStrokeRef.current) {
                 pushUndo();
                 gestureStrokeRef.current = true;
             }
             applyTool(col, row);
         },
-        [applyTool, pushUndo],
+        [activeTool, applyTool, pushUndo, selectLayerAtCell],
     );
 
     // Pinch released
@@ -948,32 +1288,6 @@ export default function LEDBoard() {
     }, []);
 
     // Full open-hand swipe — stop everything and clear the board
-    const handleGestureSwipeClear = useCallback(() => {
-        // Stop animation if running
-        if (animRef.current && animRef.current.state !== "stopped") {
-            animRef.current.stop();
-            setMarqueeBuffer(null);
-            if (snapshotRef.current) {
-                snapshotRef.current = null;
-            }
-            setCurrentAnim(null);
-            setAnimFrame(0);
-            try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
-            strokeRecorder.resume();
-        }
-        // Clear effects
-        effectsRef.current?.clearEffects();
-        // Clear the board
-        strokeRecorder.clear();
-        contentLayersRef.current = [];
-        layerManagerRef.current?.getActiveLayer()?.grid.clear();
-        canvasHandleRef.current?.redraw();
-        // Clear undo stack
-        undoStackRef.current = [];
-        setCanUndo(false);
-        saveGridToStorage();
-    }, [saveGridToStorage]);
-
     // Status change from GestureController
     const handleGestureStatus = useCallback(
         (state: GestureLoadState, msg: string, pinching: boolean) => {
@@ -1008,52 +1322,128 @@ export default function LEDBoard() {
     }, []);
 
     // ── Clear board (full reset) ─────────────────────────────
-    const clearBoard = useCallback(() => {
-        pushUndo();
+    const clearCanvas = useCallback(() => {
+        const manager = layerManagerRef.current;
+        manager?.clearCanvas();
 
-        // 1. Stop animation if running
-        if (animRef.current && animRef.current.state !== "stopped") {
-            animRef.current.stop();
-        }
-        setCurrentAnim(null);
-        setAnimFrame(0);
-        try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
-
-        // 2. Clear effects
-        effectsRef.current?.clearEffects();
-
-        // 3. Null out snapshot and content layers
-        snapshotRef.current = null;
-        contentLayersRef.current = [];
-        setMarqueeBuffer(null);
-
-        // 4. Stop recording playback if active
         if (sessionRecRef.current.state === "playing" || sessionRecRef.current.state === "paused") {
             sessionRecRef.current.stopPlayback();
         }
+        if (actionRecRef.current.state === "playing" || actionRecRef.current.state === "paused") {
+            actionRecRef.current.stopPlayback();
+        }
 
-        // 5. Resume stroke recorder
+        snapshotRef.current = null;
+        contentLayersRef.current = [];
+        setActiveLayerMarqueeBuffer(null);
+        setCellInfo(null);
+        strokeActiveRef.current = false;
+        gestureStrokeRef.current = false;
+        animWasPlayingBeforePlayback.current = false;
+        try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
+
         strokeRecorder.clear();
         strokeRecorder.resume();
 
-        // 6. Clear ALL layers' grids (not just the active one)
-        const manager = layerManagerRef.current;
-        if (manager) {
-            for (const layer of manager.layers) {
-                layer.grid.clear();
-            }
-        }
-
-        // 7. Clear undo stack
         undoStackRef.current = [];
         setCanUndo(false);
 
-        // 8. Redraw and save
+        syncActiveLayerState();
         canvasHandleRef.current?.redraw();
         saveGridToStorage();
-    }, [pushUndo, saveGridToStorage]);
+        recordAction({ type: "clear" });
+    }, [recordAction, saveGridToStorage, syncActiveLayerState]);
+
+    const resetWorkspace = useCallback(() => {
+        clearPersistedWorkspaceState();
+        sessionRecRef.current.clear();
+        actionRecRef.current.clear();
+
+        const nextSettings = { ...DEFAULT_SETTINGS };
+        setSettings(nextSettings);
+        setActiveTool("draw");
+        setActiveColor([0, 255, 0]);
+        setActivePaletteId(null);
+        setRecordingMode("action");
+        setAnimState("stopped");
+        setCurrentAnim(null);
+        setAnimFps(15);
+        setAnimFrame(0);
+        setEffectsEnabled(false);
+        setActiveEffectPreset(EFFECT_PRESETS[0]);
+        setEffectsDistance(1);
+        setEffectsSpeed(1);
+        setShowPlaybackBar(true);
+        setShowTimeline(false);
+        setGestureEnabled(false);
+        setGestureShowCamera(true);
+        setGestureCursorScreen(null);
+        setGestureDrawing(false);
+        setGestureLoadState("loading");
+        setGestureStatusMsg("");
+        setGesturePinching(false);
+        setGesturePinchThreshold(0.08);
+        setFrameRecordingState("idle");
+        setFrameRecFrameCount(0);
+        setFrameRecDuration(0);
+        setFrameRecPlaybackFrame(0);
+        setFrameRecHasRecording(false);
+        setLoopEnabled(false);
+        setActionRecordingState("idle");
+        setActionCount(0);
+        setActionDuration(0);
+        setActionPlaybackIndex(0);
+        setActionHasRecording(false);
+
+        snapshotRef.current = null;
+        contentLayersRef.current = [];
+        setActiveLayerMarqueeBuffer(null);
+        setCellInfo(null);
+        strokeActiveRef.current = false;
+        gestureStrokeRef.current = false;
+        animWasPlayingBeforePlayback.current = false;
+        undoStackRef.current = [];
+        setCanUndo(false);
+
+        strokeRecorder.clear();
+        strokeRecorder.resume();
+
+        replaceManager(window.innerWidth, window.innerHeight, nextSettings.cellSize);
+        const manager = layerManagerRef.current;
+        if (manager) {
+            setGridDims({ cols: manager.cols, rows: manager.rows });
+        }
+        requestAnimationFrame(() => {
+            syncActiveLayerState();
+            canvasHandleRef.current?.redraw();
+            saveGridToStorage();
+        });
+    }, [
+        clearPersistedWorkspaceState,
+        replaceManager,
+        saveGridToStorage,
+        setGestureCursorScreen,
+        setGestureDrawing,
+        setGestureEnabled,
+        setGestureLoadState,
+        setGesturePinching,
+        setGesturePinchThreshold,
+        setGestureShowCamera,
+        setGestureStatusMsg,
+        setLoopEnabled,
+        setFrameRecDuration,
+        setFrameRecFrameCount,
+        setFrameRecHasRecording,
+        setFrameRecPlaybackFrame,
+        setFrameRecordingState,
+        syncActiveLayerState,
+    ]);
 
     // ── Quantize buffer to active palette ─────────────────
+    const handleGestureSwipeClear = useCallback(() => {
+        clearCanvas();
+    }, [clearCanvas]);
+
     const quantizeBuffer = useCallback((buffer: Uint8ClampedArray) => {
         if (!activePaletteId) return;
         const palette = getPaletteById(activePaletteId);
@@ -1101,7 +1491,7 @@ export default function LEDBoard() {
                 snapshotRef.current.fill(0);
                 fn(grid.cols, grid.rows, snapshotRef.current);
                 quantizeBuffer(snapshotRef.current); // Force colors to palette
-                captureSnapshot(snapshotRef.current);
+                captureActiveLayerSnapshot(snapshotRef.current);
                 strokeRecorder.recordBulk(before, snapshotRef.current, grid.cols);
                 if (animRef.current?.state !== "playing") {
                     grid.loadData(snapshotRef.current);
@@ -1115,17 +1505,19 @@ export default function LEDBoard() {
                 strokeRecorder.recordBulk(before, grid.data, grid.cols);
                 canvasHandleRef.current?.redraw();
             }
+            recordLayerSync();
             saveGridToStorage();
         },
-        [pushUndo, saveGridToStorage, quantizeBuffer],
+        [pushUndo, recordLayerSync, saveGridToStorage, quantizeBuffer],
     );
 
     // ── Render pixel text ─────────────────────────────────
     const handleRenderText = useCallback(
         (text: string, color: RGB, scale: number = 1, wrap: boolean = true, animId?: string) => {
-            const grid = layerManagerRef.current?.getActiveLayer()?.grid;
+            const activeLayer = layerManagerRef.current?.getActiveLayer();
+            const grid = activeLayer?.grid;
             const mgr = animRef.current;
-            if (!grid) return;
+            if (!grid || !activeLayer) return;
 
             // Snap color to active palette if necessary
             let targetColor = color;
@@ -1175,7 +1567,7 @@ export default function LEDBoard() {
             const { buffer, bufferCols } = renderTextToWideBuffer(
                 text, grid.cols, grid.rows, targetColor, scale, baseData,
             );
-            setMarqueeBuffer(buffer, bufferCols);
+            setActiveLayerMarqueeBuffer(buffer, bufferCols);
 
             if (shouldAnimate) {
                 // Determine target animation config
@@ -1190,10 +1582,10 @@ export default function LEDBoard() {
                 }
                 snapshotRef.current.fill(0);
                 if (baseData) snapshotRef.current.set(baseData);
-                captureSnapshot(snapshotRef.current);
+                captureActiveLayerSnapshot(snapshotRef.current);
 
                 strokeRecorder.pause();
-                mgr.load(animConfig, grid.cols, grid.rows, grid.data);
+                mgr.load(animConfig, grid.cols, grid.rows, grid.data, activeLayer.animation);
                 setCurrentAnim(animConfig);
                 try { localStorage.setItem(STORAGE_KEY_ANIM, animConfig.name); } catch { }
                 setAnimFps(animConfig.fps);
@@ -1208,7 +1600,13 @@ export default function LEDBoard() {
                         grid.loadData(snapshotRef.current);
                         snapshotRef.current = null;
                     }
+                    setActiveLayerMarqueeBuffer(null);
+                    activeLayer.animation.currentAnim = null;
+                    activeLayer.animation.snapshot = null;
+                    activeLayer.animation.frame = 0;
                     setAnimFrame(0);
+                    setAnimState("stopped");
+                    setCurrentAnim(null);
                     try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
                     strokeRecorder.resume();
                 }
@@ -1217,7 +1615,7 @@ export default function LEDBoard() {
                     snapshotRef.current.fill(0);
                     replayLayers(contentLayersRef.current, grid.cols, grid.rows, snapshotRef.current);
                     quantizeBuffer(snapshotRef.current);
-                    captureSnapshot(snapshotRef.current);
+                    captureActiveLayerSnapshot(snapshotRef.current);
                     strokeRecorder.recordText(text, grid.cols, grid.rows, targetColor, scale, true);
                     if (animRef.current?.state !== "playing") {
                         grid.loadData(snapshotRef.current);
@@ -1231,9 +1629,17 @@ export default function LEDBoard() {
                     canvasHandleRef.current?.redraw();
                 }
             }
+            recordAction({
+                type: "text",
+                text,
+                color: targetColor,
+                scale,
+                wrap,
+                animId: animId ?? null,
+            });
             saveGridToStorage();
         },
-        [pushUndo, saveGridToStorage, replayLayers, quantizeBuffer, activePaletteId],
+        [pushUndo, saveGridToStorage, replayLayers, quantizeBuffer, activePaletteId, recordAction],
     );
 
     // ── Animation controls ────────────────────────────────
@@ -1250,9 +1656,10 @@ export default function LEDBoard() {
         if (!snapshotRef.current) {
             snapshotRef.current = grid.cloneData();
         }
-        captureSnapshot(snapshotRef.current);
+        setActiveLayerMarqueeBuffer(null);
+        captureActiveLayerSnapshot(snapshotRef.current);
 
-        mgr.load(anim, grid.cols, grid.rows, grid.data);
+        mgr.load(anim, grid.cols, grid.rows, grid.data, activeLayer.animation);
         // Store animation state on the layer
         activeLayer.animation.currentAnim = anim;
         activeLayer.animation.snapshot = snapshotRef.current;
@@ -1261,27 +1668,69 @@ export default function LEDBoard() {
 
         setCurrentAnim(anim);
         try { localStorage.setItem(STORAGE_KEY_ANIM, anim.name); } catch { }
+        setAnimState("playing");
         setAnimFps(anim.fps);
         setAnimFrame(0);
         mgr.play();
-    }, []);
+        const layerId = activeLayer.id;
+        recordAction({ type: "animation", layerId, name: anim.name, action: "play", fps: anim.fps });
+    }, [recordAction]);
 
     const handleAnimPlay = useCallback(() => {
+        const activeLayer = layerManagerRef.current?.getActiveLayer();
         const grid = layerManagerRef.current?.getActiveLayer()?.grid;
         if (grid && snapshotRef.current) {
             // Re-capture in case we're resuming
-            captureSnapshot(snapshotRef.current);
+            captureActiveLayerSnapshot(snapshotRef.current);
+            if (activeLayer) {
+                activeLayer.animation.snapshot = snapshotRef.current;
+            }
         }
-        animRef.current?.play();
-    }, []);
+        const mgr = animRef.current;
+        if (!mgr) return;
+        mgr.play();
+        if (mgr.state === "playing") {
+            setAnimState("playing");
+        }
+        const layerId = activeLayer?.id;
+        if (layerId) {
+            recordAction({
+                type: "animation",
+                layerId,
+                name: layerManagerRef.current?.getActiveLayer()?.animation.currentAnim?.name ?? currentAnim?.name ?? null,
+                action: "play",
+                fps: animRef.current?.fps,
+            });
+        }
+    }, [currentAnim, recordAction]);
 
     const handleAnimPause = useCallback(() => {
-        animRef.current?.pause();
-    }, []);
+        const mgr = animRef.current;
+        if (!mgr) return;
+        mgr.pause();
+        const activeLayer = layerManagerRef.current?.getActiveLayer();
+        if (activeLayer) {
+            activeLayer.animation.frame = mgr.frame;
+        }
+        if (mgr.state === "paused") {
+            setAnimState("paused");
+        }
+        const layerId = activeLayer?.id;
+        if (layerId) {
+            recordAction({
+                type: "animation",
+                layerId,
+                name: activeLayer.animation.currentAnim?.name ?? null,
+                action: "pause",
+                fps: mgr.fps,
+            });
+        }
+    }, [recordAction]);
 
     const handleAnimStop = useCallback(() => {
         const activeLayer = layerManagerRef.current?.getActiveLayer();
-        animRef.current?.stop();
+        const mgr = animRef.current;
+        mgr?.stop();
         // Restore original content
         const grid = activeLayer?.grid;
         if (grid && snapshotRef.current) {
@@ -1292,122 +1741,398 @@ export default function LEDBoard() {
         if (activeLayer) {
             activeLayer.animation.currentAnim = null;
             activeLayer.animation.snapshot = null;
+            activeLayer.animation.marqueeBuffer = null;
+            activeLayer.animation.marqueeBufferCols = 0;
             activeLayer.animation.frame = 0;
+            activeLayer.animation.manager.setRuntimeContext(activeLayer.animation);
         }
         canvasHandleRef.current?.redraw();
+        setAnimState("stopped");
         setCurrentAnim(null);
         setAnimFrame(0);
         try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
         strokeRecorder.resume();
         saveGridToStorage();
-    }, [saveGridToStorage]);
+        if (activeLayer) {
+            recordAction({ type: "animation", layerId: activeLayer.id, name: null, action: "stop" });
+        }
+    }, [recordAction, saveGridToStorage]);
 
     const handleAnimFpsChange = useCallback((fps: number) => {
         setAnimFps(fps);
         animRef.current?.setFps(fps);
-    }, []);
+        const activeLayer = layerManagerRef.current?.getActiveLayer();
+        if (activeLayer) {
+            activeLayer.animation.fps = fps;
+            recordAction({
+                type: "animation",
+                layerId: activeLayer.id,
+                name: activeLayer.animation.currentAnim?.name ?? null,
+                action: activeLayer.animation.manager.state === "paused" ? "pause" : "play",
+                fps,
+            });
+        }
+    }, [recordAction]);
 
     // ── Effects controls ──────────────────────────────────
     const handleToggleEffects = useCallback(() => {
         setEffectsEnabled((prev) => {
             const next = !prev;
             effectsRef.current?.setEnabled(next);
+            const activeLayer = layerManagerRef.current?.getActiveLayer();
+            if (activeLayer) {
+                activeLayer.effects.enabled = next;
+            }
             try { localStorage.setItem(STORAGE_KEY_EFFECTS, String(next)); } catch { }
+            if (activeLayer) {
+                recordAction({
+                    type: "effect",
+                    layerId: activeLayer.id,
+                    enabled: next,
+                    presetName: activeLayer.effects.preset.name,
+                    distanceMultiplier: activeLayer.effects.distanceMultiplier,
+                    speedMultiplier: activeLayer.effects.speedMultiplier,
+                });
+            }
             return next;
         });
-    }, []);
+    }, [recordAction]);
 
     const handleSelectEffectPreset = useCallback((preset: EffectPreset) => {
         setActiveEffectPreset(preset);
         effectsRef.current?.setPreset(preset);
+        const activeLayer = layerManagerRef.current?.getActiveLayer();
+        if (activeLayer) {
+            activeLayer.effects.preset = preset;
+        }
         try { localStorage.setItem(STORAGE_KEY_EFFECT_PRESET, preset.name); } catch { }
-    }, []);
+        if (activeLayer) {
+            recordAction({
+                type: "effect",
+                layerId: activeLayer.id,
+                enabled: activeLayer.effects.enabled,
+                presetName: preset.name,
+                distanceMultiplier: activeLayer.effects.distanceMultiplier,
+                speedMultiplier: activeLayer.effects.speedMultiplier,
+            });
+        }
+    }, [recordAction]);
 
     const handleEffectsDistanceChange = useCallback((v: number) => {
         setEffectsDistance(v);
         effectsRef.current?.setDistanceMultiplier(v);
+        const activeLayer = layerManagerRef.current?.getActiveLayer();
+        if (activeLayer) {
+            activeLayer.effects.distanceMultiplier = v;
+        }
         try { localStorage.setItem(STORAGE_KEY_EFFECT_DISTANCE, String(v)); } catch { }
-    }, []);
+        if (activeLayer) {
+            recordAction({
+                type: "effect",
+                layerId: activeLayer.id,
+                enabled: activeLayer.effects.enabled,
+                presetName: activeLayer.effects.preset.name,
+                distanceMultiplier: v,
+                speedMultiplier: activeLayer.effects.speedMultiplier,
+            });
+        }
+    }, [recordAction]);
 
     const handleEffectsSpeedChange = useCallback((v: number) => {
         setEffectsSpeed(v);
         effectsRef.current?.setSpeedMultiplier(v);
+        const activeLayer = layerManagerRef.current?.getActiveLayer();
+        if (activeLayer) {
+            activeLayer.effects.speedMultiplier = v;
+        }
         try { localStorage.setItem(STORAGE_KEY_EFFECT_SPEED, String(v)); } catch { }
-    }, []);
+        if (activeLayer) {
+            recordAction({
+                type: "effect",
+                layerId: activeLayer.id,
+                enabled: activeLayer.effects.enabled,
+                presetName: activeLayer.effects.preset.name,
+                distanceMultiplier: activeLayer.effects.distanceMultiplier,
+                speedMultiplier: v,
+            });
+        }
+    }, [recordAction]);
 
     // ── Session recording controls ────────────────────────
-    const handleStartRecording = useCallback(() => {
-        const rec = sessionRecRef.current;
-        const grid = layerManagerRef.current?.getActiveLayer()?.grid;
-        if (!grid) return;
-        rec.configure({
-            cols: grid.cols,
-            rows: grid.rows,
-            captureFps: 30,
-            getGridData: () => {
-                const manager = layerManagerRef.current;
-                if (!manager) return null;
-                const raw = manager.composite();
-                // Composite all per-layer effects overlays
-                const overlay = manager.compositeEffectsOverlay();
-                if (!overlay.buffer || overlay.cols === 0) return raw;
-                const len = manager.cols * manager.rows;
-                const out = new Uint8ClampedArray(len * 3);
-                const buf = overlay.buffer;
-                for (let i = 0, j = 0; i < len; i++, j += 4) {
-                    const si = i * 3;
-                    const a = buf[j + 3] / 255;
-                    out[si] = Math.min(255, raw[si] + buf[j] * a);
-                    out[si + 1] = Math.min(255, raw[si + 1] + buf[j + 1] * a);
-                    out[si + 2] = Math.min(255, raw[si + 2] + buf[j + 2] * a);
+    const applyRecordedAction = useCallback((action: ActionEvent) => {
+        isApplyingRecordedActionRef.current = true;
+        try {
+            switch (action.type) {
+                case "tool":
+                    handleToolChange(action.tool);
+                    break;
+                case "color":
+                    handleColorChange(action.color);
+                    break;
+                case "palette":
+                    handlePaletteChange(action.paletteId);
+                    break;
+                case "draw":
+                    applyToolToCell("draw", action.col, action.row, action.color);
+                    break;
+                case "erase":
+                    applyToolToCell("erase", action.col, action.row);
+                    break;
+                case "fill":
+                    applyToolToCell("fill", action.col, action.row, action.color);
+                    break;
+                case "pattern": {
+                    const pattern = PATTERNS.find((entry) => entry.name === action.name);
+                    if (pattern) {
+                        handleApplyPattern(pattern.apply);
+                    }
+                    break;
                 }
-                return out;
+                case "text":
+                    handleRenderText(action.text, action.color, action.scale, action.wrap, action.animId ?? undefined);
+                    break;
+                case "effect":
+                    selectLayerRuntime(action.layerId);
+                    handleSelectEffectPreset(EFFECT_PRESETS.find((preset) => preset.name === action.presetName) ?? EFFECT_PRESETS[0]);
+                    if (effectsRef.current?.enabled !== action.enabled) {
+                        handleToggleEffects();
+                    }
+                    handleEffectsDistanceChange(action.distanceMultiplier);
+                    handleEffectsSpeedChange(action.speedMultiplier);
+                    break;
+                case "effectTrigger":
+                    selectLayerRuntime(action.layerId);
+                    effectsRef.current?.trigger(action.col, action.row, action.color);
+                    break;
+                case "animation": {
+                    selectLayerRuntime(action.layerId);
+                    if (action.action === "stop") {
+                        handleAnimStop();
+                        break;
+                    }
+                    if (action.action === "pause") {
+                        handleAnimPause();
+                        if (typeof action.fps === "number") {
+                            handleAnimFpsChange(action.fps);
+                        }
+                        break;
+                    }
+                    if (action.name) {
+                        const targetAnim = [...ANIMATIONS, ...TEXT_ANIMATIONS].find((entry) => entry.name === action.name);
+                        if (targetAnim) {
+                            const currentLayer = layerManagerRef.current?.getActiveLayer();
+                            if (currentLayer?.animation.currentAnim?.name !== targetAnim.name || animRef.current?.state === "stopped") {
+                                handleSelectAnimation(targetAnim);
+                            } else {
+                                handleAnimPlay();
+                            }
+                        } else {
+                            handleAnimPlay();
+                        }
+                    } else {
+                        handleAnimPlay();
+                    }
+                    if (typeof action.fps === "number") {
+                        handleAnimFpsChange(action.fps);
+                    }
+                    break;
+                }
+                case "clear":
+                    layerManagerRef.current?.clearCanvas();
+                    snapshotRef.current = null;
+                    contentLayersRef.current = [];
+                    setActiveLayerMarqueeBuffer(null);
+                    syncActiveLayerState();
+                    canvasHandleRef.current?.redraw();
+                    break;
+                case "layer":
+                    if (action.action === "sync") {
+                        const manager = layerManagerRef.current;
+                        if (!manager) break;
+                        manager.restoreSerializedLayers(action.layers, action.activeLayerId);
+                        setLayerManagerView(manager);
+                        syncActiveLayerState();
+                        canvasHandleRef.current?.redraw();
+                    } else if (action.action === "select") {
+                        selectLayerRuntime(action.layerId);
+                    }
+                    break;
+            }
+        } finally {
+            isApplyingRecordedActionRef.current = false;
+        }
+    }, [
+        applyToolToCell,
+        handleAnimFpsChange,
+        handleAnimPause,
+        handleAnimPlay,
+        handleAnimStop,
+        handleApplyPattern,
+        handleColorChange,
+        handleEffectsDistanceChange,
+        handleEffectsSpeedChange,
+        handlePaletteChange,
+        handleRenderText,
+        handleSelectAnimation,
+        handleSelectEffectPreset,
+        handleToggleEffects,
+        handleToolChange,
+        selectLayerRuntime,
+        syncActiveLayerState,
+    ]);
+
+    useEffect(() => {
+        const recorder = actionRecRef.current;
+        recorder.configure({
+            getInitialState: serializeBoardState,
+            getSeed,
+            restoreState: restoreBoardState,
+            applyAction: applyRecordedAction,
+            onStateChange: (state) => {
+                setActionRecordingState(state);
+                setActionHasRecording(recorder.hasRecording);
+                setActionCount(recorder.actionCount);
+                setActionDuration(recorder.duration);
+                if (state === "idle" && recorder.playbackActionIndex === 0) {
+                    setActionPlaybackIndex(0);
+                }
             },
-            setGridData: (data: Uint8ClampedArray) => {
-                layerManagerRef.current?.getActiveLayer()?.grid.loadData(data);
-            },
-            redraw: () => canvasHandleRef.current?.redraw(),
-            onStateChange: (state: RecordingState) => {
-                setRecordingState(state);
-                setRecHasRecording(rec.hasRecording);
-            },
-            onPlaybackFrame: (frame: number) => {
-                setRecPlaybackFrame(frame);
+            onPlaybackAction: (index, total) => {
+                setActionPlaybackIndex(index);
+                setActionCount(total);
+                setActionDuration(recorder.duration);
             },
         });
-        rec.startRecording();
-        setRecFrameCount(0);
-        setRecDuration(0);
-    }, []);
+    }, [applyRecordedAction, restoreBoardState, serializeBoardState]);
+
+    const handleToggleLoopMode = useCallback(() => {
+        setLoopEnabled((value) => {
+            const next = !value;
+            sessionRecRef.current.setLooping(next);
+            actionRecRef.current.setLooping(next);
+            return next;
+        });
+    }, [setLoopEnabled]);
+
+    const handleStartRecording = useCallback(() => {
+        const manager = layerManagerRef.current;
+        if (!manager) return;
+
+        configureFrameRecorder();
+        setShowPlaybackBar(true);
+
+        if (recordingMode === "action") {
+            setSeed(createSeed());
+            sessionRecRef.current.startRecording();
+            actionRecRef.current.startRecording();
+            setActionRecordingState("recording");
+            setActionCount(0);
+            setActionDuration(0);
+            setActionPlaybackIndex(0);
+            setActionHasRecording(false);
+            setFrameRecFrameCount(0);
+            setFrameRecDuration(0);
+            setFrameRecPlaybackFrame(0);
+            setFrameRecHasRecording(false);
+            return;
+        }
+
+        sessionRecRef.current.startRecording();
+        setFrameRecFrameCount(0);
+        setFrameRecDuration(0);
+        setFrameRecPlaybackFrame(0);
+    }, [
+        configureFrameRecorder,
+        recordingMode,
+        sessionRecRef,
+        setFrameRecDuration,
+        setFrameRecFrameCount,
+        setFrameRecHasRecording,
+        setFrameRecPlaybackFrame,
+    ]);
 
     const handleStopRecording = useCallback(() => {
-        const rec = sessionRecRef.current;
-        rec.stopRecording();
-        setRecFrameCount(rec.frameCount);
-        setRecDuration(rec.duration);
-        setRecHasRecording(rec.hasRecording);
-    }, []);
+        if (recordingMode === "action") {
+            actionRecRef.current.stopRecording();
+            setActionRecordingState("idle");
+            setActionCount(actionRecRef.current.actionCount);
+            setActionDuration(actionRecRef.current.duration);
+            setActionHasRecording(actionRecRef.current.hasRecording);
+
+            sessionRecRef.current.stopRecording();
+            if (actionRecRef.current.hasRecording) {
+                setFrameRecFrameCount(sessionRecRef.current.frameCount);
+                setFrameRecDuration(sessionRecRef.current.duration);
+                setFrameRecHasRecording(sessionRecRef.current.hasRecording);
+            } else {
+                sessionRecRef.current.clear();
+                setFrameRecFrameCount(0);
+                setFrameRecDuration(0);
+                setFrameRecPlaybackFrame(0);
+                setFrameRecHasRecording(false);
+            }
+            return;
+        }
+
+        sessionRecRef.current.stopRecording();
+        setFrameRecFrameCount(sessionRecRef.current.frameCount);
+        setFrameRecDuration(sessionRecRef.current.duration);
+        setFrameRecHasRecording(sessionRecRef.current.hasRecording);
+    }, [
+        recordingMode,
+        sessionRecRef,
+        setFrameRecDuration,
+        setFrameRecFrameCount,
+        setFrameRecHasRecording,
+        setFrameRecPlaybackFrame,
+    ]);
 
     const handleStartPlayback = useCallback(() => {
-        // Pause any running animation so it doesn't overwrite grid data
+        setShowPlaybackBar(true);
+
+        if (recordingMode === "action") {
+            if (actionRecRef.current.state !== "paused") {
+                restoreAfterActionPlaybackRef.current = {
+                    state: serializeBoardState(),
+                    seed: getSeed(),
+                };
+            }
+            actionRecRef.current.startPlayback(loopEnabled);
+            return;
+        }
+
         const mgr = animRef.current;
         if (mgr && mgr.state === "playing") {
             mgr.pause();
             animWasPlayingBeforePlayback.current = true;
+            setAnimState("paused");
         } else {
             animWasPlayingBeforePlayback.current = false;
         }
-        setShowPlaybackBar(true);
         sessionRecRef.current.startPlayback(loopEnabled);
-    }, [loopEnabled]);
+    }, [loopEnabled, recordingMode, serializeBoardState]);
 
     const handlePausePlayback = useCallback(() => {
+        if (recordingMode === "action") {
+            actionRecRef.current.pausePlayback();
+            return;
+        }
         sessionRecRef.current.pausePlayback();
-    }, []);
+    }, [recordingMode, sessionRecRef]);
 
     const handleStopPlayback = useCallback(() => {
+        if (recordingMode === "action") {
+            actionRecRef.current.stopPlayback();
+            const previous = restoreAfterActionPlaybackRef.current;
+            restoreAfterActionPlaybackRef.current = null;
+            if (previous) {
+                restoreBoardState(previous.state, previous.seed);
+            }
+            setActionPlaybackIndex(0);
+            return;
+        }
+
         sessionRecRef.current.stopPlayback();
-        // Restore the grid to whatever was there before playback
         const grid = layerManagerRef.current?.getActiveLayer()?.grid;
         if (grid && snapshotRef.current) {
             grid.loadData(snapshotRef.current);
@@ -1415,35 +2140,78 @@ export default function LEDBoard() {
         } else if (grid) {
             canvasHandleRef.current?.redraw();
         }
-        // Resume animation if it was playing before
         if (animWasPlayingBeforePlayback.current) {
             animWasPlayingBeforePlayback.current = false;
             animRef.current?.play();
+            setAnimState("playing");
         }
-    }, []);
+    }, [recordingMode, restoreBoardState, sessionRecRef]);
 
     const handleExportRecording = useCallback(() => {
+        if (recordingMode === "action") {
+            actionRecRef.current.downloadRecording();
+            return;
+        }
         sessionRecRef.current.downloadRecording();
-    }, []);
+    }, [recordingMode, sessionRecRef]);
 
     const handleImportRecording = useCallback(async (file: File) => {
-        const rec = sessionRecRef.current;
-        const ok = await rec.loadFromFileInput(file);
-        if (ok) {
-            setRecFrameCount(rec.frameCount);
-            setRecDuration(rec.duration);
-            setRecHasRecording(rec.hasRecording);
-            setRecordingState("idle");
+        const actionOk = await actionRecRef.current.loadFromFileInput(file);
+        if (actionOk) {
+            setRecordingMode("action");
+            setActionRecordingState("idle");
+            setActionCount(actionRecRef.current.actionCount);
+            setActionDuration(actionRecRef.current.duration);
+            setActionPlaybackIndex(0);
+            setActionHasRecording(actionRecRef.current.hasRecording);
+            return;
         }
-    }, []);
+
+        const frameOk = await sessionRecRef.current.loadFromFileInput(file);
+        if (frameOk) {
+            setRecordingMode("frame");
+            setFrameRecFrameCount(sessionRecRef.current.frameCount);
+            setFrameRecDuration(sessionRecRef.current.duration);
+            setFrameRecHasRecording(sessionRecRef.current.hasRecording);
+            setFrameRecordingState("idle");
+        }
+    }, [sessionRecRef, setFrameRecDuration, setFrameRecFrameCount, setFrameRecHasRecording, setFrameRecordingState]);
 
     const handleClearRecording = useCallback(() => {
+        if (recordingMode === "action") {
+            actionRecRef.current.clear();
+            setActionRecordingState("idle");
+            setActionCount(0);
+            setActionDuration(0);
+            setActionPlaybackIndex(0);
+            setActionHasRecording(false);
+            sessionRecRef.current.clear();
+            setFrameRecFrameCount(0);
+            setFrameRecDuration(0);
+            setFrameRecHasRecording(false);
+            setFrameRecPlaybackFrame(0);
+            return;
+        }
+
         sessionRecRef.current.clear();
-        setRecFrameCount(0);
-        setRecDuration(0);
-        setRecHasRecording(false);
-        setRecPlaybackFrame(0);
-    }, []);
+        setFrameRecFrameCount(0);
+        setFrameRecDuration(0);
+        setFrameRecHasRecording(false);
+        setFrameRecPlaybackFrame(0);
+    }, [
+        recordingMode,
+        sessionRecRef,
+        setFrameRecDuration,
+        setFrameRecFrameCount,
+        setFrameRecHasRecording,
+        setFrameRecPlaybackFrame,
+    ]);
+
+    const recordingState = recordingMode === "action" ? actionRecordingState : frameRecordingState;
+    const recFrameCount = recordingMode === "action" ? actionCount : frameRecFrameCount;
+    const recDuration = recordingMode === "action" ? actionDuration : frameRecDuration;
+    const recPlaybackFrame = recordingMode === "action" ? actionPlaybackIndex : frameRecPlaybackFrame;
+    const recHasRecording = recordingMode === "action" ? actionHasRecording : frameRecHasRecording;
 
     // ── Fullscreen tracking ──────────────────────────────
     useEffect(() => {
@@ -1514,7 +2282,6 @@ export default function LEDBoard() {
             <LEDCanvas
                 ref={canvasHandleRef}
                 layerManagerRef={layerManagerRef}
-                effectsOverlayRef={effectsOverlayRef}
                 settings={settings}
                 onCellHover={handleCellHover}
                 onCellClick={handleCellClick}
@@ -1574,16 +2341,17 @@ export default function LEDBoard() {
             {/* Control Panel */}
             <ControlPanel
                 layerManager={layerManagerView}
-                onLayerChange={handleLayerChange}
+                onLayerChange={handleLayerChangeTracked}
                 activeTool={activeTool}
                 activeColor={activeColor}
                 settings={settings}
                 gridDims={gridDims}
                 cellInfo={cellInfo}
                 onToolChange={handleToolChange}
-                onColorChange={setActiveColor}
+                onColorChange={handleColorChange}
                 onToggleGrid={toggleGrid}
-                onClear={clearBoard}
+                onClear={clearCanvas}
+                onReset={resetWorkspace}
                 onUndo={handleUndo}
                 canUndo={canUndo}
                 onApplyPattern={handleApplyPattern}
@@ -1600,6 +2368,7 @@ export default function LEDBoard() {
                 onAnimStop={handleAnimStop}
                 onAnimFpsChange={handleAnimFpsChange}
                 // Recording props
+                recordingMode={recordingMode}
                 recordingState={recordingState}
                 hasRecording={recHasRecording}
                 recFrameCount={recFrameCount}
@@ -1608,13 +2377,8 @@ export default function LEDBoard() {
                 onStartRecording={handleStartRecording}
                 onStopRecording={handleStopRecording}
                 loopEnabled={loopEnabled}
-                onToggleLoop={() => {
-                    setLoopEnabled(v => {
-                        const next = !v;
-                        sessionRecRef.current.setLooping(next);
-                        return next;
-                    });
-                }}
+                onRecordingModeChange={setRecordingMode}
+                onToggleLoop={handleToggleLoopMode}
                 onStartPlayback={handleStartPlayback}
                 onPausePlayback={handlePausePlayback}
                 onStopPlayback={handleStopPlayback}
@@ -1643,10 +2407,10 @@ export default function LEDBoard() {
                 onToggleGestureCamera={() => setGestureShowCamera((v) => !v)}
                 panelRef={panelRef}
                 exportRecorder={sessionRecorder}
-                exportGetGridData={() => layerManagerRef.current ? layerManagerRef.current.composite() : null}
+                exportGetGridData={getDisplayGridData}
+                exportHasRecording={frameRecHasRecording}
                 activePaletteId={activePaletteId}
-                onSelectPalette={setActivePaletteId}
-                onApplyPaletteToBoard={handleApplyPaletteToBoard}
+                onSelectPalette={handlePaletteChange}
             />
 
             {/* Floating playback mini-bar */}
@@ -1685,13 +2449,7 @@ export default function LEDBoard() {
 
                     {/* Loop toggle */}
                     <button
-                        onClick={() => {
-                            setLoopEnabled(v => {
-                                const next = !v;
-                                sessionRecRef.current.setLooping(next);
-                                return next;
-                            });
-                        }}
+                        onClick={handleToggleLoopMode}
                         className={`flex items-center justify-center rounded-full w-7 h-7 transition ${loopEnabled ? "bg-green-500/30 text-green-300 hover:bg-green-500/50" : "bg-white/10 text-white/40 hover:bg-white/20"}`}
                         title={loopEnabled ? "Loop: ON" : "Loop: OFF"}
                     >

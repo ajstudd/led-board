@@ -1,4 +1,5 @@
-import { AnimationConfig } from "../types";
+import { AnimationConfig, AnimationRuntimeContext } from "../types";
+import { setAnimationRuntimeContext } from "./animations";
 
 export type AnimationState = "stopped" | "playing" | "paused";
 
@@ -24,6 +25,7 @@ export class AnimationManager {
   private _cols = 0;
   private _rows = 0;
   private _data: Uint8ClampedArray | null = null;
+  private _runtime: AnimationRuntimeContext | null = null;
   private _redraw: () => void;
   private _onStateChange?: (state: AnimationState) => void;
   private _onFrameChange?: (frame: number) => void;
@@ -64,14 +66,20 @@ export class AnimationManager {
     cols: number,
     rows: number,
     data: Uint8ClampedArray,
+    runtime?: AnimationRuntimeContext,
   ): void {
     this.stop();
     this._animation = animation;
     this._cols = cols;
     this._rows = rows;
     this._data = data;
+    this._runtime = runtime ?? null;
     this._fps = animation.fps;
     this._frame = 0;
+  }
+
+  setRuntimeContext(runtime: AnimationRuntimeContext | null): void {
+    this._runtime = runtime;
   }
 
   /** Update the grid reference (e.g. after resize) */
@@ -117,6 +125,7 @@ export class AnimationManager {
     cancelAnimationFrame(this._rafId);
     this._animation = null;
     this._data = null;
+    this._runtime = null;
   }
 
   // ── Internal loop ─────────────────────────────────────
@@ -137,7 +146,12 @@ export class AnimationManager {
 
   private _tick(): void {
     if (!this._animation || !this._data) return;
-    this._animation.tick(this._cols, this._rows, this._data, this._frame);
+    setAnimationRuntimeContext(this._runtime);
+    try {
+      this._animation.tick(this._cols, this._rows, this._data, this._frame);
+    } finally {
+      setAnimationRuntimeContext(null);
+    }
     this._onFrameChange?.(this._frame);
     this._frame++;
     this._redraw();

@@ -12,6 +12,7 @@ import PaletteSelector from "./PaletteSelector";
 import { AnimationState } from "../lib/animation";
 import { RecordingState } from "../lib/sessionRecorder";
 import { SessionRecorder } from "../lib/sessionRecorder";
+import { RecordingMode } from "../lib/actionRecorder";
 import { EffectPreset } from "../lib/effects";
 import { LayerManager } from "../lib/layerManager";
 import LayerPanel from "./LayerPanel";
@@ -72,6 +73,7 @@ interface ControlPanelProps {
     onColorChange: (color: RGB) => void;
     onToggleGrid: () => void;
     onClear: () => void;
+    onReset: () => void;
     onUndo: () => void;
     canUndo: boolean;
     onApplyPattern: (fn: (cols: number, rows: number, data: Uint8ClampedArray) => void) => void;
@@ -88,12 +90,14 @@ interface ControlPanelProps {
     onAnimStop: () => void;
     onAnimFpsChange: (fps: number) => void;
     // Recording
+    recordingMode: RecordingMode;
     recordingState: RecordingState;
     hasRecording: boolean;
     recFrameCount: number;
     recDuration: number;
     recPlaybackFrame: number;
     loopEnabled: boolean;
+    onRecordingModeChange: (mode: RecordingMode) => void;
     onToggleLoop: () => void;
     onStartRecording: () => void;
     onStopRecording: () => void;
@@ -128,16 +132,17 @@ interface ControlPanelProps {
     // Export
     exportRecorder: SessionRecorder;
     exportGetGridData: () => Uint8ClampedArray | null;
+    exportHasRecording: boolean;
     // Palette
     activePaletteId: string | null;
     onSelectPalette: (id: string | null) => void;
-    onApplyPaletteToBoard: () => void;
     // Layer props
     layerManager: LayerManager | null;
     onLayerChange: () => void;
 }
 
 const TOOLS: { kind: ToolKind; label: string; shortLabel: string }[] = [
+    { kind: "select", label: "Select", shortLabel: "Select" },
     { kind: "draw", label: "Draw", shortLabel: "Draw" },
     { kind: "erase", label: "Erase", shortLabel: "Erase" },
     { kind: "fill", label: "Fill", shortLabel: "Fill" },
@@ -147,6 +152,13 @@ const TOOLS: { kind: ToolKind; label: string; shortLabel: string }[] = [
 // SVG icons for tools — compact and crisp
 function ToolIcon({ kind, size = 14 }: { kind: ToolKind; size?: number }) {
     switch (kind) {
+        case "select":
+            return (
+                <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 2.5l8 7-3.8.7-.7 3.8z" />
+                    <path d="M8.5 8.5l3 4" />
+                </svg>
+            );
         case "draw":
             return (
                 <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -242,12 +254,14 @@ export default function ControlPanel({
     onAnimPause,
     onAnimStop,
     onAnimFpsChange,
+    recordingMode,
     recordingState,
     hasRecording,
     recFrameCount,
     recDuration,
     recPlaybackFrame,
     loopEnabled,
+    onRecordingModeChange,
     onToggleLoop,
     onStartRecording,
     onStopRecording,
@@ -278,9 +292,10 @@ export default function ControlPanel({
     panelRef,
     exportRecorder,
     exportGetGridData,
+    exportHasRecording,
     activePaletteId,
     onSelectPalette,
-    onApplyPaletteToBoard,
+    onReset,
     layerManager,
     onLayerChange,
 }: ControlPanelProps) {
@@ -472,7 +487,6 @@ export default function ControlPanel({
                             activePaletteId={activePaletteId}
                             onSelectPalette={onSelectPalette}
                             activeColor={activeColor}
-                            onApplyPaletteToBoard={onApplyPaletteToBoard}
                         />
                     </AccordionSection>
 
@@ -591,12 +605,14 @@ export default function ControlPanel({
 
                     <AccordionSection title="Session & Rendering" isOpen={!!openSections.session} onToggle={() => toggleSection("session")}>
                         <RecordingPanel
+                            recordingMode={recordingMode}
                             recordingState={recordingState}
                             hasRecording={hasRecording}
                             frameCount={recFrameCount}
                             duration={recDuration}
                             playbackFrame={recPlaybackFrame}
                             loopEnabled={loopEnabled}
+                            onRecordingModeChange={onRecordingModeChange}
                             onToggleLoop={onToggleLoop}
                             onStartRecording={onStartRecording}
                             onStopRecording={onStopRecording}
@@ -613,7 +629,7 @@ export default function ControlPanel({
                             rows={gridDims.rows}
                             getGridData={exportGetGridData}
                             recorder={exportRecorder}
-                            hasRecording={hasRecording}
+                            hasRecording={exportHasRecording}
                         />
                     </AccordionSection>
                 </div>
@@ -640,9 +656,15 @@ export default function ControlPanel({
                     </button>
                     <button
                         onClick={onClear}
-                        className="flex-1 rounded bg-red-600/50 px-2 py-2 sm:py-1.5 text-xs hover:bg-red-500/70 transition min-h-9 sm:min-h-0"
+                        className="flex-1 rounded bg-red-600/40 px-2 py-2 sm:py-1.5 text-xs hover:bg-red-500/55 transition min-h-9 sm:min-h-0"
                     >
-                        Clear
+                        Clear Canvas
+                    </button>
+                    <button
+                        onClick={onReset}
+                        className="flex-1 rounded bg-white/10 px-2 py-2 sm:py-1.5 text-xs hover:bg-white/20 transition min-h-9 sm:min-h-0"
+                    >
+                        Reset Workspace
                     </button>
                 </div>
 

@@ -1,14 +1,19 @@
 import { GridManager } from "./grid";
-import { AnimationManager, AnimationState } from "./animation";
+import { AnimationManager } from "./animation";
 import { EffectsEngine, EffectPreset, EffectsOverlay, EFFECT_PRESETS } from "./effects";
-import { AnimationConfig } from "../types";
+import { base64ToUint8 } from "./utils";
+import {
+    AnimationConfig,
+    AnimationRuntimeContext,
+    SerializedLayerState,
+    LayerBlendMode,
+} from "../types";
 
 // ── Per-layer animation state ────────────────────────────
 
-export interface LayerAnimationState {
+export interface LayerAnimationState extends AnimationRuntimeContext {
     manager: AnimationManager;
     currentAnim: AnimationConfig | null;
-    snapshot: Uint8ClampedArray | null;
     fps: number;
     frame: number;
 }
@@ -31,7 +36,7 @@ export interface Layer {
     name: string;
     visible: boolean;
     opacity: number; // 0 to 1
-    blendMode: "normal" | "add" | "multiply"; // simple blend modes
+    blendMode: LayerBlendMode; // simple blend modes
     grid: GridManager;
     /** Per-layer animation (one AnimationManager per layer) */
     animation: LayerAnimationState;
@@ -69,6 +74,52 @@ export class LayerManager {
         );
     }
 
+    private hasLayerName(name: string, excludeId?: string): boolean {
+        const target = name.trim().toLowerCase();
+        return this.layers.some((layer) =>
+            layer.id !== excludeId && layer.name.trim().toLowerCase() === target,
+        );
+    }
+
+    private getNextDefaultLayerName(): string {
+        let index = Math.max(2, this.layers.length + 1);
+        while (this.hasLayerName(`Layer ${index}`)) {
+            index++;
+        }
+        return `Layer ${index}`;
+    }
+
+    private getUniqueLayerName(baseName: string, excludeId?: string): string {
+        const trimmed = baseName.trim() || this.getNextDefaultLayerName();
+        if (!this.hasLayerName(trimmed, excludeId)) {
+            return trimmed;
+        }
+
+        let copyIndex = 2;
+        let candidate = `${trimmed} ${copyIndex}`;
+        while (this.hasLayerName(candidate, excludeId)) {
+            copyIndex++;
+            candidate = `${trimmed} ${copyIndex}`;
+        }
+        return candidate;
+    }
+
+    private getDuplicateLayerName(name: string): string {
+        const base = name.trim() || this.getNextDefaultLayerName();
+        const preferred = `${base} Copy`;
+        if (!this.hasLayerName(preferred)) {
+            return preferred;
+        }
+
+        let copyIndex = 2;
+        let candidate = `${base} Copy ${copyIndex}`;
+        while (this.hasLayerName(candidate)) {
+            copyIndex++;
+            candidate = `${base} Copy ${copyIndex}`;
+        }
+        return candidate;
+    }
+
     /** Create a new AnimationManager for a layer */
     private createLayerAnimation(): LayerAnimationState {
         const mgr = new AnimationManager(
@@ -80,6 +131,8 @@ export class LayerManager {
             manager: mgr,
             currentAnim: null,
             snapshot: null,
+            marqueeBuffer: null,
+            marqueeBufferCols: 0,
             fps: 15,
             frame: 0,
         };
@@ -109,9 +162,17 @@ export class LayerManager {
 
     private _addLayer(name: string | undefined, grid: GridManager): Layer {
         const id = this.generateId();
-        const layer: Layer = {
+        const layer = this.createLayerRecord(id, this.getUniqueLayerName(name || this.getNextDefaultLayerName()), grid);
+        // Add to top of stack
+        this.layers.unshift(layer);
+        this.activeLayerId = id;
+        return layer;
+    }
+
+    private createLayerRecord(id: string, name: string, grid: GridManager): Layer {
+        return {
             id,
-            name: name || `Layer ${this.layers.length + 1}`,
+            name,
             visible: true,
             opacity: 1,
             blendMode: "normal",
@@ -119,10 +180,6 @@ export class LayerManager {
             animation: this.createLayerAnimation(),
             effects: this.createLayerEffects(),
         };
-        // Add to top of stack
-        this.layers.unshift(layer);
-        this.activeLayerId = id;
-        return layer;
     }
 
     deleteLayer(id: string) {
@@ -145,8 +202,19 @@ export class LayerManager {
         if (!layer) return;
         const newGrid = this.createGrid();
         newGrid.loadData(layer.grid.cloneData());
-        const newLayer = this._addLayer(`${layer.name} Copy`, newGrid);
-        
+        const newLayer = this._addLayer(this.getDuplicateLayerName(layer.name), newGrid);
+        newLayer.visible = layer.visible;
+        newLayer.opacity = layer.opacity;
+        newLayer.blendMode = layer.blendMode;
+        newLayer.effects.enabled = layer.effects.enabled;
+        newLayer.effects.preset = layer.effects.preset;
+        newLayer.effects.distanceMultiplier = layer.effects.distanceMultiplier;
+        newLayer.effects.speedMultiplier = layer.effects.speedMultiplier;
+        newLayer.effects.engine.setEnabled(layer.effects.enabled);
+        newLayer.effects.engine.setPreset(layer.effects.preset);
+        newLayer.effects.engine.setDistanceMultiplier(layer.effects.distanceMultiplier);
+        newLayer.effects.engine.setSpeedMultiplier(layer.effects.speedMultiplier);
+
         // Put it right above the duplicated layer
         this.layers.splice(0, 1); // remove from top 
         const targetIdx = this.layers.findIndex(l => l.id === id);
@@ -171,8 +239,27 @@ export class LayerManager {
         }
     }
 
+    selectLayer(id: string): boolean {
+        if (!this.layers.some((layer) => layer.id === id)) {
+            return false;
+        }
+        this.activeLayerId = id;
+        return true;
+    }
+
     getActiveLayer(): Layer | null {
         return this.layers.find(l => l.id === this.activeLayerId) || null;
+    }
+
+    pickLayerAt(col: number, row: number): Layer | null {
+        for (const layer of this.layers) {
+            if (!layer.visible || layer.opacity <= 0 || !layer.grid.inBounds(col, row)) continue;
+            const color = layer.grid.getCell(col, row);
+            if (color[0] !== 0 || color[1] !== 0 || color[2] !== 0) {
+                return layer;
+            }
+        }
+        return null;
     }
 
     resizePreserveDims(newCols: number, newRows: number) {
@@ -209,6 +296,86 @@ export class LayerManager {
             layer.effects.engine.updateGrid(this.cols, this.rows);
             layer.effects.overlay = layer.effects.engine.overlay;
         }
+    }
+
+    clearCanvas() {
+        for (const layer of this.layers) {
+            layer.animation.manager.stop();
+            layer.animation.currentAnim = null;
+            layer.animation.snapshot = null;
+            layer.animation.marqueeBuffer = null;
+            layer.animation.marqueeBufferCols = 0;
+            layer.animation.frame = 0;
+
+            layer.effects.engine.clearEffects();
+            layer.effects.overlay = layer.effects.engine.overlay;
+
+            layer.grid.clear();
+        }
+    }
+
+    resetAllLayers() {
+        this.clearCanvas();
+
+        for (const layer of this.layers) {
+            layer.effects.engine.setEnabled(false);
+            layer.effects.enabled = false;
+            layer.effects.preset = EFFECT_PRESETS[0];
+            layer.effects.distanceMultiplier = 1;
+            layer.effects.speedMultiplier = 1;
+            layer.effects.engine.setPreset(EFFECT_PRESETS[0]);
+            layer.effects.engine.setDistanceMultiplier(1);
+            layer.effects.engine.setSpeedMultiplier(1);
+            layer.effects.overlay = layer.effects.engine.overlay;
+
+            layer.visible = true;
+            layer.opacity = 1;
+            layer.blendMode = "normal";
+        }
+    }
+
+    resetProject() {
+        this.destroy();
+        this.layers = [];
+        this.activeLayerId = null;
+        this.nextLayerId = 1;
+        this.addLayer("Background");
+    }
+
+    restoreSerializedLayers(layers: SerializedLayerState[], activeLayerId: string | null) {
+        this.destroy();
+        this.layers = [];
+
+        for (const serialized of layers) {
+            const grid = this.createGrid();
+            const data = base64ToUint8(serialized.data);
+            grid.loadData(data);
+
+            const layer = this.createLayerRecord(serialized.id, serialized.name, grid);
+            layer.visible = serialized.visible;
+            layer.opacity = serialized.opacity;
+            layer.blendMode = serialized.blendMode;
+            layer.effects.enabled = serialized.effects.enabled;
+            layer.effects.preset = EFFECT_PRESETS.find((preset) => preset.name === serialized.effects.presetName) ?? EFFECT_PRESETS[0];
+            layer.effects.distanceMultiplier = serialized.effects.distanceMultiplier;
+            layer.effects.speedMultiplier = serialized.effects.speedMultiplier;
+            layer.effects.engine.setEnabled(serialized.effects.enabled);
+            layer.effects.engine.setPreset(layer.effects.preset);
+            layer.effects.engine.setDistanceMultiplier(serialized.effects.distanceMultiplier);
+            layer.effects.engine.setSpeedMultiplier(serialized.effects.speedMultiplier);
+            layer.effects.overlay = layer.effects.engine.overlay;
+            this.layers.push(layer);
+        }
+
+        this.activeLayerId = activeLayerId && this.layers.some((layer) => layer.id === activeLayerId)
+            ? activeLayerId
+            : this.layers[0]?.id ?? null;
+
+        const maxNumericId = this.layers.reduce((max, layer) => {
+            const match = /layer-(\d+)/.exec(layer.id);
+            return match ? Math.max(max, parseInt(match[1], 10)) : max;
+        }, 0);
+        this.nextLayerId = maxNumericId + 1;
     }
 
     /** Destroy all per-layer engines (call on unmount) */
@@ -279,7 +446,7 @@ export class LayerManager {
         for (let i = this.layers.length - 1; i >= 0; i--) {
             const layer = this.layers[i];
             if (!layer.visible || !layer.effects.enabled) continue;
-            const ov = layer.effects.overlay;
+            const ov = layer.effects.engine.overlay;
             if (!ov.buffer || ov.cols === 0) continue;
 
             const buf = ov.buffer;
