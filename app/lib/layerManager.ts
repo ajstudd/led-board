@@ -9,6 +9,10 @@ import {
     LayerBlendMode,
 } from "../types";
 
+function normalizeCellCount(value: number): number {
+    return Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1;
+}
+
 // ── Per-layer animation state ────────────────────────────
 
 export interface LayerAnimationState extends AnimationRuntimeContext {
@@ -264,6 +268,8 @@ export class LayerManager {
 
     resizePreserveDims(newCols: number, newRows: number) {
         if (this.layers.length === 0) return;
+        newCols = normalizeCellCount(newCols);
+        newRows = normalizeCellCount(newRows);
         
         // Resize all layer grids and effects engines
         for (const layer of this.layers) {
@@ -298,6 +304,7 @@ export class LayerManager {
         }
     }
 
+<<<<<<< Updated upstream
     clearCanvas() {
         for (const layer of this.layers) {
             layer.animation.manager.stop();
@@ -378,6 +385,16 @@ export class LayerManager {
         this.nextLayerId = maxNumericId + 1;
     }
 
+=======
+    updateLayerEngines(cols: number, rows: number) {
+        for (const layer of this.layers) {
+            layer.animation.manager.updateGrid(cols, rows, layer.grid.data);
+            layer.effects.engine.updateGrid(cols, rows);
+            layer.effects.overlay = layer.effects.engine.overlay;
+        }
+    }
+
+>>>>>>> Stashed changes
     /** Destroy all per-layer engines (call on unmount) */
     destroy() {
         for (const layer of this.layers) {

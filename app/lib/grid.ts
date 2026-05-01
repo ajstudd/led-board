@@ -1,6 +1,18 @@
 import { RGB, GridDimensions, DEFAULT_CELL_SIZE } from "../types";
 import { rgbEqual } from "./utils";
 
+function normalizeCellSize(cellSize: number): number {
+  return Number.isFinite(cellSize) && cellSize > 0 ? cellSize : DEFAULT_CELL_SIZE;
+}
+
+function normalizeCellCount(value: number): number {
+  return Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1;
+}
+
+function cellsForViewport(viewportSize: number, cellSize: number): number {
+  return normalizeCellCount(viewportSize / cellSize);
+}
+
 /**
  * GridManager — manages the LED grid data model.
  *
@@ -18,9 +30,9 @@ export class GridManager {
     viewportHeight: number,
     cellSize: number = DEFAULT_CELL_SIZE,
   ) {
-    this._cellSize = cellSize;
-    this._cols = Math.floor(viewportWidth / cellSize);
-    this._rows = Math.floor(viewportHeight / cellSize);
+    this._cellSize = normalizeCellSize(cellSize);
+    this._cols = cellsForViewport(viewportWidth, this._cellSize);
+    this._rows = cellsForViewport(viewportHeight, this._cellSize);
     this._data = new Uint8ClampedArray(this._cols * this._rows * 3);
   }
 
@@ -132,6 +144,9 @@ export class GridManager {
 
   /** Resize the grid based directly on column and row counts */
   resizePreserveDims(newCols: number, newRows: number): void {
+    newCols = normalizeCellCount(newCols);
+    newRows = normalizeCellCount(newRows);
+
     if (newCols === this._cols && newRows === this._rows) return;
 
     const newData = new Uint8ClampedArray(newCols * newRows * 3);
@@ -160,9 +175,9 @@ export class GridManager {
     viewportHeight: number,
     newCellSize: number,
   ): void {
-    this._cellSize = newCellSize;
-    const newCols = Math.floor(viewportWidth / newCellSize);
-    const newRows = Math.floor(viewportHeight / newCellSize);
+    this._cellSize = normalizeCellSize(newCellSize);
+    const newCols = cellsForViewport(viewportWidth, this._cellSize);
+    const newRows = cellsForViewport(viewportHeight, this._cellSize);
 
     if (newCols === this._cols && newRows === this._rows) return;
 

@@ -19,7 +19,6 @@ import {
   packDelta,
   unpackDelta,
   packedDeltaSize,
-  DeltaResult,
 } from "./deltaCodec";
 
 // ── Constants ────────────────────────────────────────────

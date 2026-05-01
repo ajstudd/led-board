@@ -198,12 +198,13 @@ const LEDCanvas = forwardRef<CanvasHandle, CanvasProps>(function LEDCanvas(
 
         const w = window.innerWidth;
         const h = window.innerHeight;
+        if (w <= 0 || h <= 0) return;
 
         canvas.width = w;
         canvas.height = h;
 
-        const newCols = Math.floor(w / settings.cellSize);
-        const newRows = Math.floor(h / settings.cellSize);
+        const newCols = Math.max(1, Math.floor(w / settings.cellSize));
+        const newRows = Math.max(1, Math.floor(h / settings.cellSize));
 
         grid.resizePreserveDims(newCols, newRows);
 

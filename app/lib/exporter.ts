@@ -12,7 +12,7 @@
  */
 
 import { GifEncoder } from "./gifEncoder";
-import { encodeVideo, VideoEncoderOptions } from "./videoEncoder";
+import { encodeVideo } from "./videoEncoder";
 import { SessionRecorder } from "./sessionRecorder";
 import { applyDelta } from "./deltaCodec";
 

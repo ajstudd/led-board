@@ -68,16 +68,10 @@ export default function TimelinePanel({
 
     // ── Drag & Drop State ───────────────────────
     const [draggingId, setDraggingId] = useState<string | null>(null);
-    const [dragStartMouseX, setDragStartMouseX] = useState(0);
-    const [dragStartClipX, setDragStartClipX] = useState(0);
-    const [dragMode, setDragMode] = useState<"move" | "resize">("move");
 
     const startDrag = (e: React.MouseEvent, clipId: string, mode: "move" | "resize", initialMs: number) => {
         e.stopPropagation();
         setDraggingId(clipId);
-        setDragMode(mode);
-        setDragStartMouseX(e.clientX);
-        setDragStartClipX(initialMs);
 
         const onMouseMove = (moveEvent: MouseEvent) => {
             const dx = moveEvent.clientX - e.clientX;

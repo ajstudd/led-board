@@ -1,8 +1,8 @@
 # Tenix — Master Implementation Plan
 
-> **Last Updated:** April 19, 2026 (v2 — Physics Engine Added)  
-> **Branch:** `animation-engine`  
-> **Product Vision:** "Pixel Animation Engine" — a dual-purpose creative playground and professional pixel animation maker with physics-driven motion and Lottie-compatible export.  
+> **Last Updated:** April 24, 2026 (v3 — Product Spine & Roadmap Reordered)
+> **Branch:** `animation-engine`
+> **Product Vision:** "Pixel Animation Engine" — the fastest way to create pixel/LED-style animated assets and export them for real use. Lottie, physics, 3D, APIs, and community features are expansion layers after the core exportable-animation loop is proven.
 > **This document is the SINGLE SOURCE OF TRUTH for all implementation work.**
 
 ---
@@ -15,19 +15,20 @@
 4. [Current Codebase State](#3-current-codebase-state)
 5. [Work Already Completed](#4-work-already-completed-on-animation-engine-branch)
 6. [Implementation Phases](#5-implementation-phases)
-7. [Phase 0: Bug Fixes & Cleanup](#phase-0-bug-fixes--cleanup-done)
-8. [Phase 1: Independent Per-Layer Animation & Effects](#phase-1-independent-per-layer-animation--effects-in-progress)
-9. [Phase 2: Action-Based Recording](#phase-2-action-based-recording)
-10. [Phase 3: Physics Engine](#phase-3-physics-engine)
+7. [Phase 0: Stabilization, Cleanup, and Export Trust](#phase-0-stabilization-cleanup-and-export-trust)
+8. [Phase 1: Independent Per-Layer Animation & Effects](#phase-1-independent-per-layer-animation--effects)
+9. [Phase 2: Exportable Animation MVP](#phase-2-exportable-animation-mvp)
+10. [Phase 3: Action-Based Recording & Deterministic Replay](#phase-3-action-based-recording--deterministic-replay)
 11. [Phase 4: Keyframe Interpolation Engine](#phase-4-keyframe-interpolation-engine)
 12. [Phase 5: Property Timeline with Curves](#phase-5-property-timeline-with-curves)
-13. [Phase 6: Template Fill System (Physics-Enhanced)](#phase-6-template-fill-system-physics-enhanced)
+13. [Phase 6: Template Fill System](#phase-6-template-fill-system)
 14. [Phase 7: Lottie JSON Export](#phase-7-lottie-json-export)
-15. [Phase 8: Platform & Community Features](#phase-8-platform--community-features)
-16. [Technology Decisions](#6-technology-decisions)
-17. [File Index](#7-file-index)
-18. [Monetization Strategy](#8-monetization-strategy)
-19. [Rules & Constraints for AI Agents](#9-rules--constraints-for-ai-agents)
+15. [Phase 8: Physics-Enhanced Motion](#phase-8-physics-enhanced-motion)
+16. [Phase 9: Platform, Developer, and Experimental Features](#phase-9-platform-developer-and-experimental-features)
+17. [Technology Decisions](#6-technology-decisions)
+18. [File Index](#7-file-index)
+19. [Monetization Strategy](#8-monetization-strategy)
+20. [Rules & Constraints for AI Agents](#9-rules--constraints-for-ai-agents)
 
 ---
 
@@ -35,17 +36,44 @@
 
 ### Identity: "Pixel Animation Engine"
 
-Tenix is positioned as **both** a creative tool **and** a professional animation maker:
+Tenix is positioned around one sharp wedge:
+
+> **Open Tenix, make a beautiful pixel/LED animation in minutes, and export it as a file people can actually use.**
+
+The product should not try to become a generic After Effects/Rive/LottieFiles replacement in the near term. Lottie is an important export target, not the entire identity. Tenix wins by owning the **pixel motion** niche: LED boards, pixel typography, procedural effects, animated badges, stream/social assets, dashboards, playful brand moments, and lightweight app UI animations.
+
+### Product Spine
+
+Every roadmap decision should serve this order:
+
+1. **Create** — drawing, text, patterns, palettes, effects, layers.
+2. **Animate** — per-layer animation, keyframes, timeline, templates.
+3. **Export** — PNG/SVG/GIF/WebM/MP4 first; Lottie once the internal animation model is declarative enough.
+4. **Expand** — physics, 3D, APIs, plugins, community, hardware bridge.
+
+If a feature does not improve create/animate/export, it belongs in the expansion stage.
+
+### Strategic Guardrails
+
+| Guardrail | Meaning |
+|---|---|
+| **Export before ecosystem** | Sharing and production use must work before cloud/community/API work. |
+| **Keyframes before Lottie** | Lottie export should translate declarative motion, not raw frame dumps. |
+| **Templates before complexity** | The product promise is "define start/end, Tenix fills the motion." |
+| **Physics after the core loop** | Physics is a powerful differentiator, but it should enhance templates after export/timeline/keyframes are stable. |
+| **3D/API/plugins after product-market proof** | These are valuable second-act features, not MVP requirements. |
+
+### Product Map
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │                    TENIX — Pixel Animation Engine               │
 │                                                                 │
-│  "From creative playground to production-ready Lottie files"    │
+│  "Pixel motion you can create fast and export anywhere"         │
 │                                                                 │
 ├─────────────────────┬──────────────────┬───────────────────────┤
-│   Creative Mode     │  Animation Mode  │  Engine/API Mode      │
-│   (acquisition)     │  (retention/pay) │  (ecosystem)          │
+│   Create Mode       │  Animate Mode    │  Expansion Mode       │
+│   (core loop)       │  (retention/pay) │  (after proof)        │
 │                     │                  │                        │
 │  • Freehand draw    │  • Keyframes     │  • @tenix/core NPM    │
 │  • 13 patterns      │  • Easing curves │  • Scripting sandbox   │
@@ -53,17 +81,18 @@ Tenix is positioned as **both** a creative tool **and** a professional animation
 │  • 16 animations    │  • Timeline      │  • Embeddable widget   │
 │  • Gesture control  │  • Onion skin    │  • CLI renderer        │
 │  • Vibe mode        │  • Templates     │                        │
-│  • Physics sims     │  • "Fill between"│                        │
-│                     │  • Physics bake  │                        │
+│  • Layers/palettes  │  • "Fill between"│  • 3D/WebXR view       │
+│                     │  • Lottie export │  • Physics bake        │
 ├─────────────────────┴──────────────────┴───────────────────────┤
 │                     Export Pipeline                              │
 │  GIF / WebM / MP4 / PNG / SVG / Lottie JSON / Sprite Sheet     │
 ├────────────────────────────────────────────────────────────────┤
 │                     Core Engine                                  │
 │  LayerManager (per-layer anims)  •  Grid/Pixel Engine           │
-│  PhysicsWorld (particles/forces) •  Keyframe Engine             │
+│  Keyframe Engine                 •  Template Fill System        │
 │  Effects/GLSL Pipeline           •  Config-based Recording      │
 │  Palette System                  •  Delta Codec                 │
+│  PhysicsWorld (later expansion)  •  Developer API (later)       │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -71,13 +100,13 @@ Tenix is positioned as **both** a creative tool **and** a professional animation
 
 | Audience | What They Need | What Tenix Offers |
 |---|---|---|
-| **Content Creators** | Shareable animated visuals for social media | GIF/MP4 export, templates, text animations, brand colors |
-| **Animators** | Frame-by-frame control, keyframes, timeline | Per-layer animation, keyframe engine, easing, timeline |
-| **Developers** | APIs, embeddable widgets, programmatic control | NPM package, scripting sandbox, REST API |
+| **Content Creators** | Shareable animated visuals for social media, streams, thumbnails, and brand moments | Fast creation flow, GIF/WebM/MP4 export, templates, text animations, brand colors |
+| **Designers / Animators** | Pixel-style motion assets without building everything frame by frame | Layers, keyframes, timeline, easing curves, template fill |
+| **Developers** | Embeddable/programmatic pixel displays after the core engine stabilizes | NPM package, widget, scripting sandbox, REST/WebSocket API |
 
 ### Competitive Advantage
 
-No other Lottie/animation maker targets pixel-grid aesthetics with built-in procedural GPU effects **and a physics engine**. Rive and LottieFiles target vector motion graphics. Piskel and Aseprite are static pixel art. Matter.js/Cannon.js are raw physics libraries with no creative tools. Tenix owns the intersection of **pixel art + physics-driven animation + procedural effects + professional export**.
+No other animation maker owns pixel-grid aesthetics with built-in procedural effects, easy templates, and production exports. Rive and LottieFiles target vector motion graphics. Piskel and Aseprite focus on pixel art creation. Raw physics libraries provide simulation but not creative tooling. Tenix should own the intersection of **pixel art + procedural motion + fast export**, then add physics-driven motion as a later differentiator.
 
 ---
 
@@ -92,7 +121,7 @@ No other Lottie/animation maker targets pixel-grid aesthetics with built-in proc
 │  ├── ControlPanel.tsx (accordion sidebar)                    │
 │  │   ├── ColorPicker, PaletteSelector                       │
 │  │   ├── AnimationPanel, EffectsPanel                       │
-│  │   ├── PhysicsPanel (NEW)                                │
+│  │   ├── PhysicsPanel (Phase 8)                            │
 │  │   ├── LayerPanel                                          │
 │  │   ├── RecordingPanel, ExportPanel                         │
 │  │   └── PatternSelector                                     │
@@ -102,14 +131,14 @@ No other Lottie/animation maker targets pixel-grid aesthetics with built-in proc
 │                      Hooks Layer                             │
 │  useLayerManager    useAnimationEngine    useEffectsEngine   │
 │  useSessionRecording  useGestures   useTimelineEngine        │
-│  usePhysicsEngine (NEW)                                      │
+│  usePhysicsEngine (Phase 8)                                  │
 ├─────────────────────────────────────────────────────────────┤
 │                      Engine Layer                            │
 │  GridManager (Uint8ClampedArray flat RGB buffer)             │
-│  LayerManager (per-layer animation + effects + physics)      │
+│  LayerManager (per-layer animation + effects; physics later) │
 │  AnimationManager (rAF loop, tick functions)                 │
 │  EffectsEngine (trigger-based VFX with GPU acceleration)     │
-│  PhysicsWorld (particles, forces, constraints, collision)    │
+│  PhysicsWorld (Phase 8 particles/forces/collisions)          │
 │  SessionRecorder (frame-based + action-based recording)      │
 │  TimelineManager (clip-based sequencing)                     │
 ├─────────────────────────────────────────────────────────────┤
@@ -118,7 +147,7 @@ No other Lottie/animation maker targets pixel-grid aesthetics with built-in proc
 │  animations.ts (16 content-aware animations)                 │
 │  effects.ts (13 effect presets)                              │
 │  effects-gl.ts (WebGL GPU renderer with CPU fallback)        │
-│  physics/ (math, bodies, collisions, forces, constraints)    │
+│  physics/ (Phase 8: math, bodies, collisions, forces)        │
 │  font.ts (custom 5×7 bitmap font with marquee)               │
 │  deltaCodec.ts (delta compression for recordings)            │
 │  gifEncoder.ts (custom LZW GIF encoder)                      │
@@ -140,7 +169,7 @@ LayerManager → active Layer's GridManager.setCell()
 Each Layer ticks independently:
   Layer.animation.manager.tick() → mutates Layer.grid.data
   Layer.effects.engine.tick()    → produces Layer.effects.overlay
-  Layer.physics.world.step()     → moves particles, writes back to grid
+  Layer.physics.world.step()     → Phase 8 only: moves particles, writes back to grid
     ↓
 LayerManager.composite() → merges all visible layers (bottom-to-top)
 LayerManager.compositeEffectsOverlay() → merges all effects overlays
@@ -177,7 +206,7 @@ interface Layer {
         speedMultiplier: number;
         overlay: EffectsOverlay;
     };
-    physics: {                 // OWN physics instance (NEW)
+    physics: {                 // Phase 8: OWN physics instance
         world: PhysicsWorld | null;   // null = physics disabled on this layer
         enabled: boolean;
         particles: Particle[];        // active pixel-particles
@@ -193,6 +222,8 @@ interface Layer {
 ---
 
 ## Physics Engine Architecture
+
+> **Roadmap placement:** This architecture is intentionally preserved, but it is **not** the next implementation priority. Physics now belongs to Phase 8, after export, deterministic replay, keyframes, property timeline, templates, and Lottie export are stable. Treat this section as the design reference for that future phase, not as permission to start physics before the core exportable-animation loop is proven.
 
 > [!IMPORTANT]
 > **The physics engine is a FIRST-CLASS subsystem in Tenix.** It is not a bolt-on library — it is designed to integrate deeply with the pixel grid, per-layer model, keyframe engine, and template system. It is also designed to be **standalone** so it can be published as part of `@tenix/core`.
@@ -976,7 +1007,7 @@ function step(dt: number): void {
 ### Determinism Requirements
 
 > [!WARNING]
-> **For action-based recording replay (Phase 2) to work with physics, the simulation MUST be deterministic.** This means:
+> **For action-based recording replay (Phase 3) to work with physics, the simulation MUST be deterministic.** This means:
 > 1. **Fixed timestep** (already enforced above)
 > 2. **Seeded PRNG** for any randomness in forces (turbulence noise, particle spawn jitter)
 > 3. **Consistent processing order** — sort particles by ID before integration
@@ -1076,7 +1107,7 @@ Debug mode renders physics state as an overlay on the canvas:
 
 This renders to a separate `<canvas>` overlay (similar to how effects overlay works) and is toggled via a button in PhysicsPanel.
 
-### Files to Create (Phase 3)
+### Files to Create (Phase 8)
 
 | File | Size Est. | Purpose |
 |---|---|---|
@@ -1099,7 +1130,7 @@ This renders to a separate `<canvas>` overlay (similar to how effects overlay wo
 
 ## 3. Current Codebase State
 
-### File Inventory (as of April 19, 2026)
+### File Inventory (as of April 24, 2026)
 
 | Directory | File | Size | Status |
 |---|---|---|---|
@@ -1147,8 +1178,7 @@ This renders to a separate `<canvas>` overlay (similar to how effects overlay wo
 ### Git State
 
 - **Branch:** `animation-engine` (forked from `master` at `f852ad7`)
-- **No commits on branch yet** — all changes are unstaged
-- ~11 modified files + ~20 new untracked files
+- Working tree may change as implementation continues. Always check `git status --short` before editing or committing.
 
 ---
 
@@ -1177,37 +1207,59 @@ This renders to a separate `<canvas>` overlay (similar to how effects overlay wo
 
 ## 5. Implementation Phases
 
+The roadmap is now ordered around Tenix's product spine: **create → animate → export → expand**. The immediate product proof is not "can Tenix do every future thing?" but:
+
+> Can a user make a compelling pixel/LED animation quickly and export a usable file?
+
+Everything before Phase 7 should strengthen that proof. Physics, 3D, APIs, plugins, and community features remain planned, but they are second-act work.
+
 ### Dependency Graph
 
 ```
-Phase 0: Bug Fixes ─────────────────────────── ✅ DONE
+Phase 0: Stabilization + Export Trust ───────── ✅ DONE / VERIFY
     ↓
-Phase 1: Independent Per-Layer Anim/FX ──────── 🔄 IN PROGRESS
+Phase 1: Independent Per-Layer Anim/FX ───────── 🔄 IN PROGRESS
     ↓
-Phase 2: Action-Based Recording ─────────────── builds on Phase 1
+Phase 2: Exportable Animation MVP ────────────── prove GIF/WebM/MP4/PNG/SVG
     ↓
-Phase 3: Keyframe Interpolation Engine ──────── builds on Phases 1+2
+Phase 3: Action-Based Recording ──────────────── tiny files + deterministic replay
     ↓
-Phase 4: Property Timeline with Curves ──────── builds on Phase 3
+Phase 4: Keyframe Interpolation Engine ───────── declarative animation model
     ↓
-Phase 5: Template Fill System ───────────────── builds on Phase 4
+Phase 5: Property Timeline with Curves ───────── visual keyframe editing
     ↓
-Phase 6: Lottie JSON Export ─────────────────── builds on Phases 3+4+5
+Phase 6: Template Fill System ────────────────── start/end → generated motion
     ↓
-Phase 7: Platform & Community ───────────────── builds on everything
+Phase 7: Lottie JSON Export ──────────────────── export declarative motion
+    ↓
+Phase 8: Physics-Enhanced Motion ─────────────── differentiating templates/sims
+    ↓
+Phase 9: Platform/Developer/Experimental ─────── ecosystem after proof
 ```
 
 ---
 
-## Phase 0: Bug Fixes & Cleanup (DONE)
+## Phase 0: Stabilization, Cleanup, and Export Trust
 
-> **Status: ✅ Complete**
+> **Status: ✅ Mostly complete, final verification required**
 
 See [Section 4](#4-work-already-completed-on-animation-engine-branch) above.
 
-Additionally, a code cleanup should be run to remove dead files:
+### Goal
 
-### Files to Delete
+Make the current app trustworthy before adding new feature surface. Users should be able to draw, clear, record, and export without silent failures.
+
+### Completed
+
+| Task | Status | Detail |
+|---|---|---|
+| Clear button reset | ✅ Done | Clears grids, animations, effects, snapshots, playback, undo, and layer state. |
+| Export pipeline repair | ✅ Done | `reconstructFrames()` uses direct `getFrames()` access instead of serialize/import round-trip. |
+| Palette UI cleanup | ✅ Done | Palette selection and custom set creation are cleaner. |
+
+### Remaining Cleanup
+
+#### Files to Delete
 
 | File | Reason |
 |---|---|
@@ -1216,16 +1268,28 @@ Additionally, a code cleanup should be run to remove dead files:
 | `app/hooks/useAnimationEngine.ts` (1.5KB) | Replaced by per-layer model (delete AFTER Phase 1 is verified) |
 | `app/hooks/useEffectsEngine.ts` (3.6KB) | Replaced by per-layer model (delete AFTER Phase 1 is verified) |
 
-### Planning Documents to Move
+#### Planning Documents to Move
 
 These root-level `.md` files are planning artifacts, not source code. They should NOT be deleted but can be moved to a `docs/` directory if desired:
 - `growth_plan.md`, `Growth_plan_implementation.md`, `Growth_plan_tasks.md`, `GLSL_Plan.md`, `Phase_7_Growth.md`, `18_Apr_Analysis.md`, `18_April_plan.md`
 
+### Phase 0 Verification
+
+1. `npx tsc --noEmit` passes.
+2. Drawing, erase, fill, vibe, patterns, text, animations, effects, layers, recording, and export still work.
+3. Export errors are visible to users instead of failing silently.
+4. PNG export works even without a recording.
+5. GIF/WebM/MP4 export works from a short recording or reports a useful unsupported-browser message.
+
 ---
 
-## Phase 1: Independent Per-Layer Animation & Effects (IN PROGRESS)
+## Phase 1: Independent Per-Layer Animation & Effects
 
 > **Status: 🔄 Partially complete. See Section 4 for what's done.**
+
+### Goal
+
+Make layers a real animation primitive. Each layer owns its own grid, animation manager, effects engine, opacity, visibility, and blend mode. This is the foundation for timeline, keyframes, export, and future physics.
 
 ### Remaining Work
 
@@ -1323,7 +1387,7 @@ These root-level `.md` files are planning artifacts, not source code. They shoul
 
 Add visual indicators to each layer row:
 - `▶` icon (green) if that layer's animation is playing
-- `⏸` icon (yellow) if paused  
+- `⏸` icon (yellow) if paused
 - `✦` icon (purple) if that layer's effects are enabled
 - These should be small, non-intrusive icons next to the layer name
 
@@ -1352,19 +1416,90 @@ Check how `Canvas.tsx` accesses the effects overlay and update if needed. The ch
 5. Clear → everything should reset completely
 6. Record → export as GIF → verify file works
 
+#### 1E. Orchestrator Decomposition Gate
+
+`app/components/LEDBoard.tsx` is now large enough that every major feature increases coordination risk. Before starting Phase 3+ work, extract focused hooks/modules so export, recording, layer state, gesture handling, animation state, effects state, and keyboard/fullscreen behavior are easier to reason about.
+
+Recommended split:
+
+| Module | Responsibility |
+|---|---|
+| `useBoardPersistence.ts` | localStorage load/save for settings, grid, tool, color, effects |
+| `useBoardActions.ts` | draw/erase/fill/vibe/text/pattern action handlers |
+| `useBoardExport.ts` | export data preparation and current-frame/render-to-offscreen helpers |
+| `useBoardPlayback.ts` | animation, timeline, and recording playback coordination |
+| `useBoardShortcuts.ts` | keyboard shortcuts and fullscreen behavior |
+
+This is not a product feature, but it is a roadmap gate: do it before action recording, keyframes, or physics make the component harder to safely change.
+
 ---
 
-## Phase 2: Action-Based Recording
+## Phase 2: Exportable Animation MVP
 
-> **Status: 🚧 In progress**  
-> **Depends on:** Phase 1 complete  
-> **Estimated effort:** 3-4 hours
+> **Status: 📋 Not started**
+> **Depends on:** Phase 1 complete
+> **Estimated effort:** 4-8 hours
+> **This phase proves Tenix is a usable product, not only a creative toy.**
 
 ### Goal
 
-Replace frame-by-frame recording with action-based recording for `.tenix-rec` files. File sizes drop from MBs to KBs (~1000× smaller). Frame-based recording is RETAINED as a fallback for video export and can run as a shadow capture while action recording is active.
+Make export reliable, discoverable, and useful for real workflows. A user should be able to create a small animation and leave with a valid asset.
 
-> **Implementation note (April 20, 2026):** The first production pass uses a full serialized board snapshot at record start plus timed action events afterward. Layer-stack mutations are recorded as full `layer.sync` snapshots instead of fragile incremental add/delete/update diffs, because the current UI lets many layer properties change indirectly. This keeps replay reliable while preserving compact recordings for normal drawing sessions.
+### Export Targets
+
+| Format | Priority | Use Case |
+|---|---|---|
+| PNG | P0 | Static poster/thumbnail/current frame |
+| SVG | P0 | Static scalable pixel-vector export |
+| GIF | P0 | Universal social/chat sharing |
+| WebM | P0 | High-quality browser/social animation |
+| MP4 | P1 | Broad social compatibility where browser APIs allow it |
+| Sprite sheet | P1 | Game/dev workflows |
+| Transparent PNG/WebM/APNG | P2 | Overlays, stream assets, compositing |
+| Lottie JSON | Later | Phase 7, after declarative keyframes exist |
+
+### Implementation Work
+
+| Area | Work |
+|---|---|
+| ExportPanel UX | Show progress, success, exact failure reason, and browser support notes. |
+| Current-frame export | PNG/SVG should work without requiring a recording. |
+| Recording export | GIF/WebM/MP4 should export short recordings reliably. |
+| Quality presets | Small/medium/HD size presets with FPS and duration caps. |
+| Canvas renderer | Add `renderToOffscreen(width, height, options)` for high-res and transparent export. |
+| Frame source | Keep frame-based recording as the canonical source for video export until action replay is deterministic. |
+| Validation | Exported files must be loadable in standard viewers/players. |
+
+### Files to Modify
+
+| File | Change |
+|---|---|
+| `app/components/ExportPanel.tsx` | Export progress, errors, format availability, quality presets. |
+| `app/lib/exporter.ts` | Normalize export paths and avoid fragile frame reconstruction. |
+| `app/lib/videoEncoder.ts` | Harden WebCodecs → MediaRecorder fallback behavior. |
+| `app/lib/gifEncoder.ts` | Keep pure-JS fallback; profile only if GIF export becomes too slow. |
+| `app/components/Canvas.tsx` | Add offscreen/high-res/transparent render support. |
+| `app/components/LEDBoard.tsx` | Pass correct composited grid/effects/layers to export. |
+
+### Verification
+
+1. Draw a static board → export PNG/SVG → files open correctly.
+2. Record a 3-5 second animation → export GIF/WebM → files play correctly.
+3. Try export in a browser without WebCodecs → fallback path works or gives a clear message.
+4. Export uses composited layer/effects output, not only the active layer.
+5. Export failure never disappears silently.
+
+---
+
+## Phase 3: Action-Based Recording & Deterministic Replay
+
+> **Status: 📋 Not started**
+> **Depends on:** Phase 1 + Phase 2
+> **Estimated effort:** 4-8 hours
+
+### Goal
+
+Replace frame-by-frame recording with action-based recording for `.tenix-rec` project files. File sizes drop from MBs to KBs. Frame-based recording is retained as an export/render cache for GIF/WebM/MP4.
 
 ### Architecture
 
@@ -1441,87 +1576,16 @@ type Action =
 
 ---
 
-## Phase 3: Physics Engine
-
-> **Status: 📋 Not started**  
-> **Depends on:** Phase 1 (per-layer model) + Phase 2 (seeded RNG for determinism)  
-> **Estimated effort:** 10-14 hours  
-> **This phase creates the physics subsystem documented in [Physics Engine Architecture](#physics-engine-architecture) above.**
-
-### Goal
-
-Build a complete 2D physics engine that enables pixel-particles to move, collide, and respond to force fields. This transforms static pixel art into dynamic, physically-driven animations — "draw something, then watch it explode."
-
-### Implementation Order
-
-1. **Math primitives** (`physics/math.ts`) — Vec2 with all operations
-2. **Types** (`physics/types.ts`) — Particle, BodyType, Contact, PhysicsConfig
-3. **Integrator** (`physics/integrator.ts`) — Symplectic Euler + Verlet
-4. **Rasterizer** (`physics/rasterizer.ts`) — pixelize() + rasterize() bridge
-5. **Spatial hash** (`physics/spatialHash.ts`) — broad-phase collision
-6. **Collision** (`physics/collision.ts`) — narrow phase + impulse resolution
-7. **Forces** (`physics/forces.ts`) — all 7 force field types
-8. **Constraints** (`physics/constraints.ts`) — distance, spring, pin, boundary
-9. **World** (`physics/world.ts`) — PhysicsWorld that orchestrates everything
-10. **Presets** (`physics/presets.ts`) — pre-built physics configs (explode, gravity, cloth, etc.)
-11. **Baker** (`physics/baker.ts`) — bakePhysicsToKeyframes()
-12. **Index** (`physics/index.ts`) — public API
-13. **Hook** (`usePhysicsEngine.ts`) — React lifecycle adapter
-14. **UI** (`PhysicsPanel.tsx`) — controls UI
-
-### Files to Create
-
-See the table in [Physics Engine Architecture → Files to Create](#files-to-create-phase-3) above.
-
-### Files to Modify
-
-| File | Change |
-|---|---|
-| `app/lib/layerManager.ts` | Add `physics: LayerPhysicsState` to Layer interface. Initialize PhysicsWorld on demand when physics is enabled for a layer. Wire `destroy()` to clean up physics worlds. |
-| `app/components/LEDBoard.tsx` | Add physics tick to the render loop for layers with physics enabled. Add `physicsRef` convenience ref pointing to active layer's PhysicsWorld. Wire PhysicsPanel callbacks. |
-| `app/components/ControlPanel.tsx` | Add PhysicsPanel accordion section. |
-| `app/components/LayerPanel.tsx` | Add `⚙` icon indicator for layers with physics enabled. |
-| `app/lib/animations.ts` | Replace all `Math.random()` calls with seeded RNG (prerequisite from Phase 2 but critical for physics determinism). |
-| `app/lib/effects.ts` | Replace all `Math.random()` calls with seeded RNG. |
-| `app/lib/patterns.ts` | Replace all `Math.random()` calls with seeded RNG. |
-
-### Physics Presets (Pre-Built Configs)
-
-| Preset | Forces | Constraints | Use Case |
-|---|---|---|---|
-| **Gravity Drop** | DirectionalGravity(0, 9.81) + BoundaryConstraint(floor) | none | Pixels fall to the bottom of the grid and pile up |
-| **Explode** | ExplosionImpulse(center, 1000) + DragForce(0.02) | BoundaryConstraint (optional) | Pixels fly outward from center |
-| **Wind Scatter** | WindField(5, 0, turbulence=0.5) + DirectionalGravity(0, 2) | none | Pixels blow sideways like leaves |
-| **Vortex Swirl** | VortexField(center, 200) + DragForce(0.05) | BoundaryConstraint | Pixels spiral around a point |
-| **Black Hole** | PointGravity(center, 500) + DragForce(0.01) | none | Pixels attracted to center, collapse |
-| **Cloth** | DirectionalGravity(0, 5) | DistanceConstraint grid + PinConstraint top row | Hanging cloth that sways |
-| **Rope** | DirectionalGravity(0, 9.81) | DistanceConstraint chain + PinConstraint one end | Dangling rope |
-| **Bounce** | DirectionalGravity(0, 15) | BoundaryConstraint(restitution=0.8) | Pixel ball bouncing in a box |
-| **Magnet** | AttractRepel(center, ±300) | BoundaryConstraint | Pixels attracted or repelled from cursor |
-| **Zero Gravity** | DragForce(0.001) | BoundaryConstraint | Floating particles with minimal drag |
-
-### Verification
-
-1. `tsc --noEmit` passes
-2. Draw some pixels → enable "Gravity Drop" preset → pixels should fall and bounce off the floor
-3. Draw text → enable "Explode" → text should burst outward
-4. Enable "Cloth" → a cloth grid should appear and sway with gravity
-5. Multi-layer: Layer 1 has gravity, Layer 2 has vortex → both run independently
-6. Physics particles rasterize cleanly back to the pixel grid (no gaps, no artifacts)
-7. Debug overlay shows particle circles, velocity arrows, and force field regions
-
----
-
 ## Phase 4: Keyframe Interpolation Engine
 
-> **Status: 📋 Not started**  
-> **Depends on:** Phase 1 + Phase 3 (physics-based easings)  
-> **Estimated effort:** 6-8 hours  
-> **This is the CORE of the animation engine vision.**
+> **Status: 📋 Not started**
+> **Depends on:** Phase 1 + Phase 3
+> **Estimated effort:** 6-8 hours
+> **This is the CORE of the animation-engine vision.**
 
 ### Goal
 
-Build a data-driven animation system where the user defines state at time T₁ and T₂, and the engine interpolates between them. This replaces the current procedural-only animation model.
+Build a data-driven animation system where the user defines state at time T1 and T2, and the engine interpolates between them. This replaces the current procedural-only animation model and makes future Lottie export realistic.
 
 ### Architecture
 
@@ -1555,7 +1619,6 @@ export const easings = {
   easeInElastic: (t: number) => /* ... */,
   easeOutBounce: (t: number) => /* ... */,
   spring: (t: number) => /* ... */,
-  // ... etc
 };
 ```
 
@@ -1563,48 +1626,43 @@ export const easings = {
 The core interpolation engine:
 
 ```typescript
-/** A single animatable property value at a point in time */
 interface Keyframe<T> {
-  time: number;        // in frames or milliseconds
+  time: number;
   value: T;
   easing: EasingFunction;
 }
 
-/** A track of keyframes for a single property */
 interface PropertyTrack<T> {
-  property: string;    // e.g., "position.x", "opacity", "color.r"
+  property: string;
   keyframes: Keyframe<T>[];
-  interpolate: (a: T, b: T, t: number) => T; // lerp function for this type
+  interpolate: (a: T, b: T, t: number) => T;
 }
 
-/** Animated properties for a layer */
 interface LayerAnimation {
   layerId: string;
-  tracks: PropertyTrack<number | RGB | [number, number]>[]; // position, color, opacity, etc.
+  tracks: PropertyTrack<number | RGB | [number, number]>[];
 }
 
-/** The full animation project */
 interface AnimationProject {
-  duration: number;     // total duration in frames
+  duration: number;
   fps: number;
   layers: LayerAnimation[];
 }
 
-/** Engine that evaluates all tracks at a given time */
 class KeyframeEngine {
   evaluate(project: AnimationProject, time: number): Map<string, AnimatedValues>;
-  addKeyframe(layerId: string, property: string, time: number, value: any, easing: EasingFunction): void;
+  addKeyframe(layerId: string, property: string, time: number, value: unknown, easing: EasingFunction): void;
   removeKeyframe(layerId: string, property: string, time: number): void;
-  getKeyframesForLayer(layerId: string): PropertyTrack[];
+  getKeyframesForLayer(layerId: string): PropertyTrack<unknown>[];
 }
 ```
 
-### Animatable Properties (per layer)
+### Animatable Properties
 
 | Property | Type | Default | Description |
 |---|---|---|---|
-| `position.x` | `number` | 0 | Horizontal offset (in cells) |
-| `position.y` | `number` | 0 | Vertical offset (in cells) |
+| `position.x` | `number` | 0 | Horizontal offset in cells |
+| `position.y` | `number` | 0 | Vertical offset in cells |
 | `opacity` | `number` | 1.0 | Layer transparency |
 | `scale` | `number` | 1.0 | Uniform scale factor |
 | `rotation` | `number` | 0 | Rotation in degrees |
@@ -1616,9 +1674,9 @@ class KeyframeEngine {
 
 | File | Change |
 |---|---|
-| `app/lib/layerManager.ts` | Add animated properties to Layer (position, scale, rotation). Update `composite()` to apply transforms before blending. |
-| `app/components/Canvas.tsx` | Support rendering with per-layer transforms (translate, scale, rotate). Use canvas 2D transforms or a per-pixel approach for rotate. |
-| `app/components/LEDBoard.tsx` | Wire keyframe engine into the render loop. On each frame, evaluate all keyframe tracks and apply results to layers before compositing. |
+| `app/lib/layerManager.ts` | Add animated layer properties and ensure `composite()` can apply transforms. |
+| `app/components/Canvas.tsx` | Support per-layer transforms during render/export. |
+| `app/components/LEDBoard.tsx` | Wire keyframe evaluation into the render loop and export paths. |
 
 ### Verification
 
@@ -1630,8 +1688,8 @@ class KeyframeEngine {
 
 ## Phase 5: Property Timeline with Curves
 
-> **Status: 📋 Not started**  
-> **Depends on:** Phase 4  
+> **Status: 📋 Not started**
+> **Depends on:** Phase 4
 > **Estimated effort:** 8-10 hours
 
 ### Goal
@@ -1687,10 +1745,10 @@ This extends the existing `TimelinePanel.tsx` (which currently does clip-based s
 
 ---
 
-## Phase 6: Template Fill System (Physics-Enhanced)
+## Phase 6: Template Fill System
 
-> **Status: 📋 Not started**  
-> **Depends on:** Phases 3+4+5 (physics engine, keyframes, timeline)  
+> **Status: 📋 Not started**
+> **Depends on:** Phases 4+5
 > **Estimated effort:** 4-6 hours
 
 ### Goal
@@ -1720,7 +1778,7 @@ Engine auto-generates:
 | **Emphasis** | Pulse, Shake, Wiggle, Flash, Rubber Band |
 | **Transitions** | Cross Fade, Wipe (L/R/U/D), Pixelate, Morph |
 | **Loops** | Breathe, Float, Rotate, Color Cycle, Wave |
-| **Physics** (NEW) | **Gravity Drop, Wind Scatter, Vortex Swirl, Shatter, Black Hole, Cloth Wave** |
+| **Physics-ready** | Explode, Gravity Drop, Wind Scatter, Vortex Swirl, Shatter, Black Hole, Cloth Wave. These start as keyframe approximations and become true physics templates in Phase 8. |
 
 ### Files to Create
 
@@ -1729,7 +1787,11 @@ Engine auto-generates:
 | `app/lib/templates.ts` | Template definitions (each is a function that generates keyframes OR sets up physics) |
 | `app/components/TemplatePicker.tsx` | UI for browsing and applying templates |
 
-### How Physics Templates Work
+### Template Rule
+
+Templates should generate editable keyframes first. This keeps the core workflow simple: apply template, scrub timeline, tweak keyframes, export. Physics-backed templates are allowed later, but they must bake into keyframes so the result remains editable and exportable.
+
+### Future Physics Template Behavior
 
 Physics-powered templates don't generate keyframes directly. Instead, they:
 1. Call `pixelize()` to convert the current grid into particles
@@ -1755,8 +1817,8 @@ const explodeTemplate: Template = {
 
 ## Phase 7: Lottie JSON Export
 
-> **Status: 📋 Not started**  
-> **Depends on:** Phases 4, 5, 6  
+> **Status: 📋 Not started**
+> **Depends on:** Phases 4, 5, 6
 > **Estimated effort:** 8-12 hours
 
 ### Goal
@@ -1817,23 +1879,97 @@ This can reduce shape count by 10-100×.
 
 ---
 
-## Phase 8: Platform & Community Features
+## Phase 8: Physics-Enhanced Motion
 
-> **Status: 📋 Not started**  
-> **Depends on:** All previous phases  
-> **Estimated effort:** Weeks of work (ongoing)
+> **Status: 📋 Not started**
+> **Depends on:** Phases 3, 4, 5, 6
+> **Estimated effort:** 10-14 hours for core; more for advanced presets
+> **This phase creates the physics subsystem documented in [Physics Engine Architecture](#physics-engine-architecture).**
+
+### Goal
+
+Add physics as a differentiating animation generator, not as a distraction from the core product. The primary user-facing promise is: "draw text or pixels, choose a physics template, bake it into editable motion."
+
+### Implementation Order
+
+1. **Math primitives** (`physics/math.ts`) — Vec2 with mutating hot-path operations
+2. **Types** (`physics/types.ts`) — Particle, BodyType, Contact, PhysicsConfig
+3. **Integrator** (`physics/integrator.ts`) — Symplectic Euler + Verlet
+4. **Rasterizer** (`physics/rasterizer.ts`) — pixelize() + rasterize() bridge
+5. **Spatial hash** (`physics/spatialHash.ts`) — broad-phase collision
+6. **Collision** (`physics/collision.ts`) — narrow phase + impulse resolution
+7. **Forces** (`physics/forces.ts`) — gravity, wind, vortex, explosion, drag, attract/repel
+8. **Constraints** (`physics/constraints.ts`) — distance, spring, pin, boundary
+9. **World** (`physics/world.ts`) — PhysicsWorld orchestration
+10. **Presets** (`physics/presets.ts`) — explode, gravity, cloth, vortex, etc.
+11. **Baker** (`physics/baker.ts`) — bakePhysicsToKeyframes()
+12. **Hook/UI** (`usePhysicsEngine.ts`, `PhysicsPanel.tsx`) — integrate only after engine is deterministic
+
+### Physics Presets
+
+| Preset | Forces | Constraints | Use Case |
+|---|---|---|---|
+| **Gravity Drop** | DirectionalGravity + floor boundary | optional boundary | Pixels fall and pile up |
+| **Explode** | ExplosionImpulse + drag | optional boundary | Text or drawings burst outward |
+| **Wind Scatter** | WindField + turbulence | none | Pixels drift sideways |
+| **Vortex Swirl** | VortexField + drag | boundary | Pixels spiral around a point |
+| **Black Hole** | PointGravity + drag | none | Pixels collapse toward center |
+| **Cloth** | Gravity | distance + pin constraints | Hanging pixel fabric |
+| **Rope** | Gravity | distance chain + pin | Dangling pixel rope |
+| **Bounce** | Gravity | boundary with restitution | Bouncing pixel objects |
+| **Magnet** | AttractRepel | boundary | Cursor-driven attraction/repulsion |
+| **Zero Gravity** | low drag | boundary | Floating particle field |
+
+### Files to Modify
+
+| File | Change |
+|---|---|
+| `app/lib/layerManager.ts` | Add `physics: LayerPhysicsState` to `Layer` only when Phase 8 begins. |
+| `app/components/LEDBoard.tsx` | Add physics tick and bake workflow after keyframes/timeline are stable. |
+| `app/components/ControlPanel.tsx` | Add PhysicsPanel section after core animation UI is usable. |
+| `app/components/LayerPanel.tsx` | Add physics status indicator. |
+| `app/lib/templates.ts` | Upgrade physics-ready templates to true simulation-backed templates. |
+
+### Verification
+
+1. Deterministic replay produces identical particle/keyframe output from the same seed.
+2. Draw text → apply "Explode" → bake → editable keyframes are generated.
+3. Multi-layer: one layer uses gravity while another remains normal.
+4. Physics particles rasterize cleanly back to the pixel grid.
+5. Exported GIF/WebM/Lottie reflects baked physics motion.
+
+---
+
+## Phase 9: Platform, Developer, and Experimental Features
+
+> **Status: 📋 Not started**
+> **Depends on:** Core product proof from Phases 0-8
+> **Estimated effort:** Weeks/months of work, split into separate projects
 
 ### Features (prioritized)
 
-1. **Cloud Save/Share** — Save projects to cloud, get shareable URLs with previews
-2. **Template Marketplace** — Community-contributed animation templates
-3. **Plugin System** — Custom patterns, effects, tools via JS/WASM plugins
-4. **NPM Package** — Publish `@tenix/core` for developers
-5. **Embeddable Widget** — `<tenix-board>` Web Component
-6. **Scripting Sandbox** — Monaco editor with grid API for creative coding
-7. **Audio Reactive Mode** — Web Audio API drives effects in real-time
-8. **3D View Mode** — Three.js renderer reading from GridManager (optional, for showcase)
-9. **Physical LED Bridge** — WebSerial API to drive WS2812B/NeoPixel hardware
+| Priority | Feature | Placement |
+|---|---|---|
+| 1 | **Cloud Save/Share** | After export works, because share links need previews and stored project files. |
+| 2 | **Template Gallery / Marketplace** | After templates are useful locally. |
+| 3 | **NPM Package** | After `app/lib/` APIs stabilize around grid, patterns, effects, keyframes, templates. |
+| 4 | **Embeddable Widget** | After NPM/core API is stable. |
+| 5 | **Plugin System** | After core extension points are proven; sandboxing required. |
+| 6 | **Scripting Sandbox** | After plugin/core APIs exist; likely Monaco in a sandboxed iframe. |
+| 7 | **Audio Reactive Mode** | After effects/timeline/export are stable; useful for stream visuals. |
+| 8 | **3D View Mode** | Three.js-only optional renderer for LED panel/cube showcase. |
+| 9 | **Physical LED Bridge** | WebSerial/WebUSB bridge to WS2812B/NeoPixel hardware. |
+| 10 | **REST/WebSocket API / CLI Renderer** | Only after there is demand from developers/dashboard users. |
+
+### Explicitly Out of Scope
+
+These are discarded from the product scope unless a future strategy changes:
+
+| Idea | Reason |
+|---|---|
+| Generic vector animation editor | Competes directly with Rive/LottieFiles/After Effects and weakens Tenix's pixel-first wedge. |
+| Full custom 3D engine | Three.js should handle 3D view mode; building transforms/cameras/lighting from scratch is not core value. |
+| General-purpose social network | Tenix may have sharing/community templates, but not a broad social platform. |
 
 ---
 
@@ -1865,31 +2001,31 @@ These decisions are FINAL and should not be revisited without strong justificati
 
 | Phase | File | Purpose |
 |---|---|---|
-| 2 | `app/lib/actionRecorder.ts` | Action-based recording and deterministic replay |
-| 2 | `app/lib/seededRng.ts` | Seeded PRNG for deterministic replay |
-| 3 | `app/lib/physics/math.ts` | Vec2 class with immutable + mutating operations |
-| 3 | `app/lib/physics/types.ts` | Particle, BodyType, Contact, PhysicsConfig interfaces |
-| 3 | `app/lib/physics/world.ts` | PhysicsWorld container — step(), addParticle(), addForce() |
-| 3 | `app/lib/physics/integrator.ts` | Symplectic Euler + Verlet integration functions |
-| 3 | `app/lib/physics/spatialHash.ts` | Spatial hash grid for broad-phase collision |
-| 3 | `app/lib/physics/collision.ts` | Narrow phase + impulse-based collision response |
-| 3 | `app/lib/physics/forces.ts` | All 7 force field types (gravity, wind, vortex, explosion, drag, attract, point-gravity) |
-| 3 | `app/lib/physics/constraints.ts` | All constraints (distance, spring, pin, boundary) |
-| 3 | `app/lib/physics/rasterizer.ts` | pixelize(), rasterize(), rasterizeInterpolated() |
-| 3 | `app/lib/physics/presets.ts` | Pre-built configs (explode, gravity drop, cloth, rope, bounce, etc.) |
-| 3 | `app/lib/physics/baker.ts` | bakePhysicsToKeyframes() + bakedToPropertyTracks() |
-| 3 | `app/lib/physics/index.ts` | Public API re-export |
-| 3 | `app/components/PhysicsPanel.tsx` | UI for physics controls (force fields, presets, debug toggle) |
-| 3 | `app/hooks/usePhysicsEngine.ts` | React hook bridging PhysicsWorld to component lifecycle |
-| 4 | `app/lib/easings.ts` | 30+ easing functions (including physics-based: spring, bounce, damped oscillation) |
+| 3 | `app/lib/actionRecorder.ts` | Action-based recording and deterministic replay |
+| 3 | `app/lib/seededRng.ts` | Seeded PRNG for deterministic replay |
+| 4 | `app/lib/easings.ts` | 30+ easing functions, including later physics-inspired easings |
 | 4 | `app/lib/keyframeEngine.ts` | Core keyframe interpolation engine |
 | 5 | `app/components/PropertyTimeline.tsx` | Visual keyframe timeline UI |
 | 5 | `app/components/KeyframeEditor.tsx` | Keyframe value + easing editor popup |
 | 5 | `app/components/EasingPicker.tsx` | Visual easing function selector |
-| 6 | `app/lib/templates.ts` | Pre-built animation + physics template definitions |
+| 6 | `app/lib/templates.ts` | Pre-built animation templates; physics-ready templates become true physics in Phase 8 |
 | 6 | `app/components/TemplatePicker.tsx` | Template browser UI |
 | 7 | `app/lib/lottieExporter.ts` | Lottie JSON export |
 | 7 | `app/lib/pixelToVector.ts` | Pixel → optimized vector rectangles |
+| 8 | `app/lib/physics/math.ts` | Vec2 class with immutable + mutating operations |
+| 8 | `app/lib/physics/types.ts` | Particle, BodyType, Contact, PhysicsConfig interfaces |
+| 8 | `app/lib/physics/world.ts` | PhysicsWorld container — step(), addParticle(), addForce() |
+| 8 | `app/lib/physics/integrator.ts` | Symplectic Euler + Verlet integration functions |
+| 8 | `app/lib/physics/spatialHash.ts` | Spatial hash grid for broad-phase collision |
+| 8 | `app/lib/physics/collision.ts` | Narrow phase + impulse-based collision response |
+| 8 | `app/lib/physics/forces.ts` | All 7 force field types (gravity, wind, vortex, explosion, drag, attract, point-gravity) |
+| 8 | `app/lib/physics/constraints.ts` | All constraints (distance, spring, pin, boundary) |
+| 8 | `app/lib/physics/rasterizer.ts` | pixelize(), rasterize(), rasterizeInterpolated() |
+| 8 | `app/lib/physics/presets.ts` | Pre-built configs (explode, gravity drop, cloth, rope, bounce, etc.) |
+| 8 | `app/lib/physics/baker.ts` | bakePhysicsToKeyframes() + bakedToPropertyTracks() |
+| 8 | `app/lib/physics/index.ts` | Public API re-export |
+| 8 | `app/components/PhysicsPanel.tsx` | UI for physics controls (force fields, presets, debug toggle) |
+| 8 | `app/hooks/usePhysicsEngine.ts` | React hook bridging PhysicsWorld to component lifecycle |
 
 ### Files That Will Be DELETED
 
@@ -1933,7 +2069,7 @@ These decisions are FINAL and should not be revisited without strong justificati
 3. **No new dependencies without justification** — the project is intentionally lean (~8K lines, zero runtime dependencies for core logic). The physics engine MUST be custom TypeScript, not Matter.js/Rapier/etc.
 4. **Performance-first data model** — Always use `Uint8ClampedArray` flat buffers for grid data. Never use nested arrays or objects for pixel data.
 5. **GPU fallback pattern** — Any GPU-accelerated feature must have a CPU fallback. Pattern: `const renderer = gpuRenderer ?? cpuFallback;`
-6. **Per-layer isolation** — Animations, effects, and physics are per-layer. Never create global instances. Always access through `layer.animation.manager`, `layer.effects.engine`, and `layer.physics.world`.
+6. **Per-layer isolation** — Animations and effects are per-layer now; physics becomes per-layer in Phase 8. Never create global instances. Access through `layer.animation.manager`, `layer.effects.engine`, and, once Phase 8 exists, `layer.physics.world`.
 7. **Preserve existing functionality** — Every change must be verified to not break drawing, patterns, animations, effects, recording, export, gestures, or layers.
 8. **Physics determinism** — The physics engine must be fully deterministic: fixed timestep, seeded PRNG for any randomness, consistent processing order (sort by particle ID). No `Math.random()` anywhere in the simulation loop.
 9. **Physics-grid bridge** — Physics always operates on continuous coordinates. Conversion to/from grid cells is ONLY done by `pixelize()` and `rasterize()` in `physics/rasterizer.ts`. Never write physics positions directly to the grid.
@@ -1944,8 +2080,8 @@ These decisions are FINAL and should not be revisited without strong justificati
 2. **Engine layer has no React dependencies** — Files in `app/lib/` (including `app/lib/physics/`) must be pure TypeScript with no React imports. They are importable by any framework.
 3. **Components receive data via props** — Components in `app/components/` never directly import engine instances. They receive data and callbacks from LEDBoard.tsx via ControlPanel.tsx.
 4. **Hooks are adapters** — Files in `app/hooks/` bridge between React lifecycle and engine instances. They create/manage engine instances and expose state + handlers.
-5. **Physics is a standalone module** — The `app/lib/physics/` directory must have ZERO imports from other `app/lib/` files. It exports a clean public API via `physics/index.ts`. Integration happens in `layerManager.ts` and `LEDBoard.tsx`, not inside the physics module.
-6. **Physics simulation loop** — Physics world runs at a fixed 60Hz timestep, decoupled from the render frame rate. Use accumulator pattern with interpolated rendering. Never tie physics step to `requestAnimationFrame` directly.
+5. **Physics is a standalone module once Phase 8 begins** — The `app/lib/physics/` directory must have ZERO imports from other `app/lib/` files. It exports a clean public API via `physics/index.ts`. Integration happens in `layerManager.ts` and `LEDBoard.tsx`, not inside the physics module.
+6. **Physics simulation loop once Phase 8 begins** — Physics world runs at a fixed 60Hz timestep, decoupled from the render frame rate. Use accumulator pattern with interpolated rendering. Never tie physics step to `requestAnimationFrame` directly.
 
 ### Testing Rules
 
