@@ -35,6 +35,8 @@ import {
     STORAGE_KEY_COLOR, STORAGE_KEY_TOOL, STORAGE_KEY_SHOW_GRID 
 } from "../hooks/useBoardPersistence";
 import { useBoardShortcuts } from "../hooks/useBoardShortcuts";
+import { usePhysicsEngine } from "../hooks/usePhysicsEngine";
+import type { PresetName } from "../lib/physics/presets";
 
 const STORAGE_KEY_ANIM  = "tenix-anim";
 const STORAGE_KEY_GRID  = "tenix-grid";
@@ -123,6 +125,10 @@ export default function LEDBoard() {
     const [activeEffectPreset, setActiveEffectPreset] = useState<import('../lib/effects').EffectPreset>(EFFECT_PRESETS[0]);
     const [effectsDistance, setEffectsDistance] = useState(1);
     const [effectsSpeed, setEffectsSpeed] = useState(1);
+    const [physicsEnabled, setPhysicsEnabled] = useState(false);
+    const [physicsPreset, setPhysicsPreset] = useState<PresetName | null>(null);
+    const [physicsGravity, setPhysicsGravity] = useState(36);
+    const [physicsBounce, setPhysicsBounce] = useState(0.3);
 
     /** Sync the convenience refs and UI state to the active layer's animation/effects */
     const syncActiveLayerState = useCallback(() => {
@@ -149,6 +155,10 @@ export default function LEDBoard() {
         setActiveEffectPreset(layer.effects.preset);
         setEffectsDistance(layer.effects.distanceMultiplier);
         setEffectsSpeed(layer.effects.speedMultiplier);
+        setPhysicsEnabled(layer.physics.enabled);
+        setPhysicsPreset(layer.physics.preset);
+        setPhysicsGravity(layer.physics.gravityY);
+        setPhysicsBounce(layer.physics.restitution);
     }, [layerManagerRef]);
 
     const getDisplayGridData = useCallback(() => {
@@ -619,6 +629,42 @@ export default function LEDBoard() {
     }, []);
 
     const canvasRedraw = useCallback(() => canvasHandleRef.current?.redraw(), []);
+
+    // ── Physics engine (per-layer simulation driver) ──────
+    const physics = usePhysicsEngine({ layerManagerRef, onRedraw: canvasRedraw });
+
+    const handleTogglePhysics = useCallback(() => {
+        setPhysicsEnabled((prev) => {
+            const next = !prev;
+            if (next) physics.enable(); else physics.disable();
+            const layer = layerManagerRef.current?.getActiveLayer();
+            setPhysicsPreset(layer?.physics.preset ?? null);
+            setAnimState(layer?.animation.manager.state ?? "stopped");
+            return next;
+        });
+    }, [physics, layerManagerRef]);
+
+    const handleApplyPhysicsPreset = useCallback((name: PresetName) => {
+        physics.applyPresetToActive(name);
+        setPhysicsEnabled(true);
+        setPhysicsPreset(name);
+        setAnimState(layerManagerRef.current?.getActiveLayer()?.animation.manager.state ?? "stopped");
+    }, [physics, layerManagerRef]);
+
+    const handlePhysicsGravityChange = useCallback((v: number) => {
+        setPhysicsGravity(v);
+        physics.setConfig({ gravityY: v });
+    }, [physics]);
+
+    const handlePhysicsBounceChange = useCallback((v: number) => {
+        setPhysicsBounce(v);
+        physics.setConfig({ restitution: v });
+    }, [physics]);
+
+    const handleResetPhysics = useCallback(() => {
+        physics.reset();
+        setPhysicsPreset(null);
+    }, [physics]);
 
     // useBoardActions: only replayLayers is consumed here. The action-recording-aware
     // applyTool / handleApplyPattern / handleRenderText are defined inline below (they
@@ -2342,6 +2388,16 @@ export default function LEDBoard() {
                 onSelectEffectPreset={handleSelectEffectPreset}
                 onEffectsDistanceChange={handleEffectsDistanceChange}
                 onEffectsSpeedChange={handleEffectsSpeedChange}
+                // Physics props
+                physicsEnabled={physicsEnabled}
+                physicsPreset={physicsPreset}
+                physicsGravity={physicsGravity}
+                physicsBounce={physicsBounce}
+                onTogglePhysics={handleTogglePhysics}
+                onApplyPhysicsPreset={handleApplyPhysicsPreset}
+                onPhysicsGravityChange={handlePhysicsGravityChange}
+                onPhysicsBounceChange={handlePhysicsBounceChange}
+                onResetPhysics={handleResetPhysics}
                 // Gesture props
                 gestureEnabled={gestureEnabled}
                 onToggleGesture={handleToggleGesture}

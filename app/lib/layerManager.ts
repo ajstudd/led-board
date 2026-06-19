@@ -1,6 +1,8 @@
 import { GridManager } from "./grid";
 import { AnimationManager } from "./animation";
 import { EffectsEngine, EffectPreset, EffectsOverlay, EFFECT_PRESETS } from "./effects";
+import { PhysicsWorld } from "./physics/world";
+import type { PresetName } from "./physics/presets";
 import { base64ToUint8 } from "./utils";
 import {
     AnimationConfig,
@@ -33,6 +35,21 @@ export interface LayerEffectsState {
     overlay: EffectsOverlay;
 }
 
+// ── Per-layer physics state ──────────────────────────────
+
+export interface LayerPhysicsState {
+    /** Deterministic simulation world; null until physics is first enabled. */
+    world: PhysicsWorld | null;
+    enabled: boolean;
+    preset: PresetName | null;
+    /** Downward gravity in cells/s². */
+    gravityY: number;
+    /** Bounciness 0–1. */
+    restitution: number;
+    /** The pre-simulation drawing, restored when physics is disabled. */
+    snapshot: Uint8ClampedArray | null;
+}
+
 // ── Layer interface ──────────────────────────────────────
 
 export interface Layer {
@@ -46,6 +63,8 @@ export interface Layer {
     animation: LayerAnimationState;
     /** Per-layer effects (one EffectsEngine per layer) */
     effects: LayerEffectsState;
+    /** Per-layer physics (one PhysicsWorld per layer; null until enabled) */
+    physics: LayerPhysicsState;
 }
 
 export class LayerManager {
@@ -173,6 +192,17 @@ export class LayerManager {
         return layer;
     }
 
+    private createLayerPhysics(): LayerPhysicsState {
+        return {
+            world: null,
+            enabled: false,
+            preset: null,
+            gravityY: 36,
+            restitution: 0.3,
+            snapshot: null,
+        };
+    }
+
     private createLayerRecord(id: string, name: string, grid: GridManager): Layer {
         return {
             id,
@@ -183,6 +213,7 @@ export class LayerManager {
             grid,
             animation: this.createLayerAnimation(),
             effects: this.createLayerEffects(),
+            physics: this.createLayerPhysics(),
         };
     }
 
@@ -315,6 +346,11 @@ export class LayerManager {
 
             layer.effects.engine.clearEffects();
             layer.effects.overlay = layer.effects.engine.overlay;
+
+            layer.physics.enabled = false;
+            layer.physics.preset = null;
+            layer.physics.snapshot = null;
+            layer.physics.world?.clear();
 
             layer.grid.clear();
         }

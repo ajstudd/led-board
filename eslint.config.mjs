@@ -14,6 +14,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     "app/components/LEDBoard.new.tsx",
     "app/components/LEDBoardLayered.tsx",
+    // Compiled output of the physics smoke test (npm run test:physics)
+    ".tmp-physics/**",
+    "scripts/**",
   ]),
 ]);
 

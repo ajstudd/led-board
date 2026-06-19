@@ -8,7 +8,9 @@ import AnimationPanel from "./AnimationPanel";
 import RecordingPanel from "./RecordingPanel";
 import ExportPanel from "./ExportPanel";
 import EffectsPanel from "./EffectsPanel";
+import PhysicsPanel from "./PhysicsPanel";
 import PaletteSelector from "./PaletteSelector";
+import type { PresetName } from "../lib/physics/presets";
 import { AnimationState } from "../lib/animation";
 import { RecordingState } from "../lib/sessionRecorder";
 import { SessionRecorder } from "../lib/sessionRecorder";
@@ -116,6 +118,16 @@ interface ControlPanelProps {
     onSelectEffectPreset: (preset: EffectPreset) => void;
     onEffectsDistanceChange: (v: number) => void;
     onEffectsSpeedChange: (v: number) => void;
+    // Physics
+    physicsEnabled: boolean;
+    physicsPreset: PresetName | null;
+    physicsGravity: number;
+    physicsBounce: number;
+    onTogglePhysics: () => void;
+    onApplyPhysicsPreset: (name: PresetName) => void;
+    onPhysicsGravityChange: (v: number) => void;
+    onPhysicsBounceChange: (v: number) => void;
+    onResetPhysics: () => void;
     // Gesture
     gestureEnabled: boolean;
     onToggleGesture: () => void;
@@ -279,6 +291,15 @@ export default function ControlPanel({
     onSelectEffectPreset,
     onEffectsDistanceChange,
     onEffectsSpeedChange,
+    physicsEnabled,
+    physicsPreset,
+    physicsGravity,
+    physicsBounce,
+    onTogglePhysics,
+    onApplyPhysicsPreset,
+    onPhysicsGravityChange,
+    onPhysicsBounceChange,
+    onResetPhysics,
     gestureEnabled,
     onToggleGesture,
     gestureVideoRef,
@@ -306,6 +327,7 @@ export default function ControlPanel({
         patterns: true,
         animations: true,
         effects: true,
+        physics: true,
         gestures: true,
         session: true,
     });
@@ -526,6 +548,20 @@ export default function ControlPanel({
                             onSelectPreset={onSelectEffectPreset}
                             onDistanceChange={onEffectsDistanceChange}
                             onSpeedChange={onEffectsSpeedChange}
+                        />
+                    </AccordionSection>
+
+                    <AccordionSection title="Physics" isOpen={!!openSections.physics} onToggle={() => toggleSection("physics")}>
+                        <PhysicsPanel
+                            enabled={physicsEnabled}
+                            preset={physicsPreset}
+                            gravity={physicsGravity}
+                            bounce={physicsBounce}
+                            onToggle={onTogglePhysics}
+                            onApplyPreset={onApplyPhysicsPreset}
+                            onGravityChange={onPhysicsGravityChange}
+                            onBounceChange={onPhysicsBounceChange}
+                            onReset={onResetPhysics}
                         />
                     </AccordionSection>
 

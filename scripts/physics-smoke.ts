@@ -10,7 +10,7 @@
  *   3. pixelize/rasterize round-trips a static scene.
  *   4. gravityDrop is stable: particles fall, settle in bounds, no NaN.
  */
-import { PhysicsWorld, explode, scatter, gravityDrop, BodyType } from "../app/lib/physics/index";
+import { PhysicsWorld, explode, scatter, gravityDrop, applyPreset, BodyType } from "../app/lib/physics/index";
 
 let failures = 0;
 function check(name: string, cond: boolean) {
@@ -97,6 +97,28 @@ check("seeds matter: different seed ⇒ different scatter result", d1 !== d2);
   check("gravityDrop: pixels moved downward", endY > startY);
   check("gravityDrop: no NaN positions", !anyNaN);
   check("gravityDrop: all pixels settled within bounds", inBounds);
+}
+
+// 5. Per-layer lifecycle (mirrors usePhysicsEngine: snapshot → pixelize →
+//    preset → step → restore on disable)
+{
+  const { data, cols, rows } = makeGrid();
+  const snapshot = new Uint8ClampedArray(data); // "capture drawing" on enable
+  const world = new PhysicsWorld({ seed: 5 });
+  world.config.gravity.y = 36;
+  world.pixelize(data, cols, rows);
+  applyPreset(world, "explode");
+  for (let i = 0; i < 30; i++) world.step(1 / 60);
+  world.rasterizeTo(data, cols, rows);
+  let moved = false;
+  for (let i = 0; i < data.length; i++) if (data[i] !== snapshot[i]) { moved = true; break; }
+  check("lifecycle: preset + steps visibly change the grid", moved);
+
+  // "disable" → restore the captured drawing
+  data.set(snapshot);
+  let restored = true;
+  for (let i = 0; i < data.length; i++) if (data[i] !== snapshot[i]) { restored = false; break; }
+  check("lifecycle: disable restores the original drawing", restored);
 }
 
 console.log(`\n${failures === 0 ? "ALL PASSED ✅" : `${failures} FAILED ❌`}`);
