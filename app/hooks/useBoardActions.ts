@@ -96,8 +96,9 @@ export function useBoardActions({
     // ── Apply the active tool to a single cell ────────────────────────────
     const applyTool = useCallback(
         (col: number, row: number) => {
-            const grid = layerManagerRef.current?.getActiveLayer()?.grid;
-            if (!grid) return;
+            const activeLayer = layerManagerRef.current?.getActiveLayer();
+            const grid = activeLayer?.grid;
+            if (!grid || !activeLayer) return;
 
             const snap = snapshotRef.current;
 
@@ -130,7 +131,7 @@ export function useBoardActions({
                         grid.loadData(snap);
                         grid.floodFill(col, row, drawColor);
                         snapshotRef.current = grid.cloneData();
-                        captureSnapshot(snapshotRef.current);
+                        captureSnapshot(snapshotRef.current, activeLayer.animation);
                         strokeRecorder.recordBulk(before, snapshotRef.current, grid.cols);
                         break;
                     }
@@ -173,8 +174,9 @@ export function useBoardActions({
     // ── Apply a procedural pattern ────────────────────────────────────────
     const handleApplyPattern = useCallback(
         (fn: (cols: number, rows: number, data: Uint8ClampedArray) => void) => {
-            const grid = layerManagerRef.current?.getActiveLayer()?.grid;
-            if (!grid) return;
+            const activeLayer = layerManagerRef.current?.getActiveLayer();
+            const grid = activeLayer?.grid;
+            if (!grid || !activeLayer) return;
             pushUndo();
 
             contentLayersRef.current = [{ type: "pattern", fn }];
@@ -184,7 +186,7 @@ export function useBoardActions({
                 snapshotRef.current.fill(0);
                 fn(grid.cols, grid.rows, snapshotRef.current);
                 quantizeBuffer(snapshotRef.current);
-                captureSnapshot(snapshotRef.current);
+                captureSnapshot(snapshotRef.current, activeLayer.animation);
                 strokeRecorder.recordBulk(before, snapshotRef.current, grid.cols);
                 if (animRef.current?.state !== "playing") {
                     grid.loadData(snapshotRef.current);
@@ -206,9 +208,10 @@ export function useBoardActions({
     // ── Render pixel text (optionally animated) ───────────────────────────
     const handleRenderText = useCallback(
         (text: string, color: RGB, scale: number = 1, wrap: boolean = true, animId?: string) => {
-            const grid = layerManagerRef.current?.getActiveLayer()?.grid;
+            const activeLayer = layerManagerRef.current?.getActiveLayer();
+            const grid = activeLayer?.grid;
             const mgr = animRef.current;
-            if (!grid) return;
+            if (!grid || !activeLayer) return;
 
             // Snap color to active palette
             let targetColor = color;
@@ -242,7 +245,7 @@ export function useBoardActions({
                 }
             }
             const { buffer, bufferCols } = renderTextToWideBuffer(text, grid.cols, grid.rows, targetColor, scale, baseData);
-            setMarqueeBuffer(buffer, bufferCols);
+            setMarqueeBuffer(activeLayer.animation, buffer, bufferCols);
 
             if (shouldAnimate) {
                 const targetAnimId = wantsAnim ? animId : "Text Marquee";
@@ -251,10 +254,10 @@ export function useBoardActions({
                 if (!snapshotRef.current) snapshotRef.current = grid.cloneData();
                 snapshotRef.current.fill(0);
                 if (baseData) snapshotRef.current.set(baseData);
-                captureSnapshot(snapshotRef.current);
+                captureSnapshot(snapshotRef.current, activeLayer.animation);
 
                 strokeRecorder.pause();
-                mgr.load(animConfig, grid.cols, grid.rows, grid.data);
+                mgr.load(animConfig, grid.cols, grid.rows, grid.data, activeLayer.animation);
                 onStartAnimation(animConfig);
                 mgr.play();
             } else {
@@ -269,7 +272,7 @@ export function useBoardActions({
                     snapshotRef.current.fill(0);
                     replayLayers(contentLayersRef.current, grid.cols, grid.rows, snapshotRef.current);
                     quantizeBuffer(snapshotRef.current);
-                    captureSnapshot(snapshotRef.current);
+                    captureSnapshot(snapshotRef.current, activeLayer.animation);
                     strokeRecorder.recordText(text, grid.cols, grid.rows, targetColor, scale, true);
                     if (animRef.current?.state !== "playing") {
                         grid.loadData(snapshotRef.current);

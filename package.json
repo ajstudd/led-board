@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:physics": "rm -rf .tmp-physics && tsc scripts/physics-smoke.ts app/lib/physics/*.ts --outDir .tmp-physics --module commonjs --target ES2019 --moduleResolution node --skipLibCheck --esModuleInterop && node .tmp-physics/scripts/physics-smoke.js"
   },
   "dependencies": {
     "@mediapipe/camera_utils": "^0.3.1640029074",

@@ -304,7 +304,6 @@ export class LayerManager {
         }
     }
 
-<<<<<<< Updated upstream
     clearCanvas() {
         for (const layer of this.layers) {
             layer.animation.manager.stop();
@@ -385,7 +384,6 @@ export class LayerManager {
         this.nextLayerId = maxNumericId + 1;
     }
 
-=======
     updateLayerEngines(cols: number, rows: number) {
         for (const layer of this.layers) {
             layer.animation.manager.updateGrid(cols, rows, layer.grid.data);
@@ -394,7 +392,6 @@ export class LayerManager {
         }
     }
 
->>>>>>> Stashed changes
     /** Destroy all per-layer engines (call on unmount) */
     destroy() {
         for (const layer of this.layers) {

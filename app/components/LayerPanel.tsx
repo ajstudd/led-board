@@ -88,7 +88,6 @@ export default function LayerPanel({ layerManager, onLayerChange }: LayerPanelPr
                     Add Layer
                 </button>
             </div>
-<<<<<<< Updated upstream
 
             <div className="custom-scrollbar flex max-h-80 flex-col gap-2 overflow-y-auto pr-0.5">
                 {layers.map((layer, index) => {
@@ -134,62 +133,6 @@ export default function LayerPanel({ layerManager, onLayerChange }: LayerPanelPr
                                             </>
                                         )}
                                     </svg>
-=======
-            
-            <div className="max-h-72 overflow-y-auto overflow-x-hidden custom-scrollbar">
-                {layers.map((layer) => {
-                    const isAnimPlaying = layer.animation.manager.state === "playing";
-                    const isAnimPaused = layer.animation.manager.state === "paused";
-                    const hasEffects = layer.effects.enabled;
-
-                    return (
-                    <div 
-                        key={layer.id} 
-                        className={`group flex min-w-0 flex-col gap-2 border-b border-white/5 p-2 transition-colors ${activeLayerId === layer.id ? 'bg-indigo-500/20' : 'hover:bg-white/5'}`}
-                        onClick={() => {
-                            if (activeLayerId !== layer.id) {
-                                layerManager.activeLayerId = layer.id;
-                                onLayerChange();
-                            }
-                        }}
-                    >
-                        <div className="flex min-w-0 items-center gap-2">
-                            <button 
-                                onClick={(e) => { e.stopPropagation(); handleToggleVisible(layer.id); }}
-                                className={`shrink-0 p-1 rounded hover:bg-white/10 ${layer.visible ? 'text-white' : 'text-white/30'}`}
-                            >
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    {layer.visible ? (
-                                        <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></>
-                                    ) : (
-                                        <><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></>
-                                    )}
-                                </svg>
-                            </button>
-                            <span className="min-w-0 flex-1 text-[11px] truncate">{layer.name}</span>
-
-                            <div className="flex shrink-0 items-center gap-1">
-                                {isAnimPlaying && (
-                                    <span className="rounded bg-emerald-500/15 px-1 py-0.5 text-[8px] font-bold uppercase leading-none text-emerald-300" title="Animation playing">
-                                        Play
-                                    </span>
-                                )}
-                                {isAnimPaused && (
-                                    <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[8px] font-bold uppercase leading-none text-amber-300" title="Animation paused">
-                                        Pause
-                                    </span>
-                                )}
-                                {hasEffects && (
-                                    <span className="rounded bg-fuchsia-500/15 px-1 py-0.5 text-[8px] font-bold uppercase leading-none text-fuchsia-300" title="Effects enabled">
-                                        FX
-                                    </span>
-                                )}
-                            </div>
-                            
-                            <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                                <button onClick={(e) => { e.stopPropagation(); handleDuplicate(layer.id); }} className="p-1 hover:bg-white/10 rounded text-white/50 hover:text-white" title="Duplicate">
-                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
->>>>>>> Stashed changes
                                 </button>
 
                                 <div className="min-w-0 flex-1">
@@ -291,37 +234,6 @@ export default function LayerPanel({ layerManager, onLayerChange }: LayerPanelPr
                                 )}
                             </div>
                         </div>
-<<<<<<< Updated upstream
-=======
-
-                        {/* Layer Sub-controls (visible only if active) */}
-                        {activeLayerId === layer.id && (
-                            <div className="grid min-w-0 gap-2 pl-6" onClick={(e) => e.stopPropagation()}>
-                                <div className="grid min-w-0 grid-cols-[auto,minmax(0,1fr),auto] items-center gap-2">
-                                    <span className="text-[9px] text-white/40">Opacity</span>
-                                    <input 
-                                        type="range" min={0} max={1} step={0.01} value={layer.opacity}
-                                        onChange={(e) => handleOpacityChange(layer.id, parseFloat(e.target.value))}
-                                        className="min-w-0 w-full h-1 accent-indigo-500"
-                                    />
-                                    <span className="text-[9px] text-white/60 text-right tabular-nums">{(layer.opacity * 100).toFixed(0)}%</span>
-                                </div>
-                                <div className="grid min-w-0 grid-cols-[auto,minmax(0,1fr)] items-center gap-2">
-                                    <span className="text-[9px] text-white/40">Blend</span>
-                                    <select 
-                                        value={layer.blendMode}
-                                        onChange={(e) => handleBlendModeChange(layer.id, e.target.value as "normal" | "add" | "multiply")}
-                                        className="min-w-0 w-full bg-black/20 border border-white/10 rounded px-1.5 py-1 text-[9px] text-white outline-none"
-                                    >
-                                        <option value="normal">Normal</option>
-                                        <option value="add">Add</option>
-                                        <option value="multiply">Multiply</option>
-                                    </select>
-                                </div>
-                            </div>
-                        )}
-                    </div>
->>>>>>> Stashed changes
                     );
                 })}
             </div>

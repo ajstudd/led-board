@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+.tmp-physics
 
 # next.js
 /.next/

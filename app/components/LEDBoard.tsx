@@ -4,7 +4,6 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import ControlPanel from "./ControlPanel";
-<<<<<<< Updated upstream
 import { DEFAULT_SETTINGS, AnimationConfig, BoardSettings, RGB, SerializedBoardState, SerializedLayerState, ToolKind } from "../types";
 import { renderTextCentered, renderTextToWideBuffer, measureText } from "../lib/font";
 import { ANIMATIONS, captureSnapshot, setMarqueeBuffer, MARQUEE_ANIMATION } from "../lib/animations";
@@ -12,31 +11,17 @@ import { PATTERNS } from "../lib/patterns";
 import { TEXT_ANIMATIONS } from "../lib/textAnimations";
 import { strokeRecorder } from "../lib/recorder";
 import { base64ToUint8, hslToRgb, uint8ToBase64 } from "../lib/utils";
-=======
-import { DEFAULT_SETTINGS, AnimationConfig, BoardSettings, RGB, ToolKind } from "../types";
-import { renderTextToWideBuffer, measureText } from "../lib/font";
-import { ANIMATIONS, captureSnapshot, setMarqueeBuffer } from "../lib/animations";
-import { base64ToUint8, uint8ToBase64 } from "../lib/utils";
->>>>>>> Stashed changes
 import GestureController, { GestureLoadState } from "./GestureController";
 import LEDCanvas, { CanvasHandle } from "./Canvas";
 import { getPaletteById } from "../lib/palette";
 import TimelinePanel from "./TimelinePanel";
-<<<<<<< Updated upstream
 import { EffectPreset, EFFECT_PRESETS } from "../lib/effects";
-=======
-import { EFFECT_PRESETS, EffectPreset } from "../lib/effects";
->>>>>>> Stashed changes
 import { RecordingState, sessionRecorder } from "../lib/sessionRecorder";
 import { actionRecorder, ActionEvent, RecordedActionInput, RecordingMode } from "../lib/actionRecorder";
 import type { LayerManager } from "../lib/layerManager";
 import { createSeed, getSeed, setSeed } from "../lib/seededRng";
 // Custom Hooks
 import { useLayerManager } from "../hooks/useLayerManager";
-<<<<<<< Updated upstream
-import { STORAGE_KEY_ANIM } from "../hooks/useAnimationEngine";
-=======
->>>>>>> Stashed changes
 import { useSessionRecording } from "../hooks/useSessionRecording";
 import { useGestures } from "../hooks/useGestures";
 import { useTimelineEngine } from "../hooks/useTimelineEngine";
@@ -49,7 +34,6 @@ import {
     STORAGE_KEY_EFFECT_SPEED,
     STORAGE_KEY_COLOR, STORAGE_KEY_TOOL, STORAGE_KEY_SHOW_GRID 
 } from "../hooks/useBoardPersistence";
-import { strokeRecorder } from "../lib/recorder";
 import { useBoardShortcuts } from "../hooks/useBoardShortcuts";
 
 const STORAGE_KEY_ANIM  = "tenix-anim";
@@ -147,7 +131,6 @@ export default function LEDBoard() {
         // Point refs at the active layer's instances
         animRef.current = layer.animation.manager;
         effectsRef.current = layer.effects.engine;
-<<<<<<< Updated upstream
         layer.animation.manager.setRuntimeContext(layer.animation);
         snapshotRef.current = layer.animation.snapshot;
 
@@ -157,8 +140,6 @@ export default function LEDBoard() {
         layer.effects.preset = layer.effects.engine.preset;
         layer.effects.distanceMultiplier = layer.effects.engine.distanceMultiplier;
         layer.effects.speedMultiplier = layer.effects.engine.speedMultiplier;
-=======
->>>>>>> Stashed changes
         // Sync UI state
         setAnimState(layer.animation.manager.state);
         setCurrentAnim(layer.animation.currentAnim);
@@ -218,7 +199,6 @@ export default function LEDBoard() {
     const { getCompositeGridWithEffects } = useBoardExport({ layerManagerRef });
 
     const {
-<<<<<<< Updated upstream
         sessionRecRef,
         recordingState: frameRecordingState,
         recFrameCount: frameRecFrameCount,
@@ -234,14 +214,6 @@ export default function LEDBoard() {
         setLoopEnabled,
     } = useSessionRecording({
         getGridData: getDisplayGridData,
-=======
-        sessionRecRef, recordingState, recFrameCount, recDuration,
-        recPlaybackFrame, recHasRecording, loopEnabled,
-        setRecordingState, setRecFrameCount, setRecDuration,
-        setRecPlaybackFrame, setRecHasRecording, setLoopEnabled
-    } = useSessionRecording({
-        getGridData: getCompositeGridWithEffects,
->>>>>>> Stashed changes
         onRedraw: useCallback(() => canvasHandleRef.current?.redraw(), []),
         onClearRecordingExt: useCallback(() => {}, [])
     });
@@ -511,11 +483,7 @@ export default function LEDBoard() {
                 }
                 const savedPresetId = localStorage.getItem(STORAGE_KEY_EFFECT_PRESET);
                 if (savedPresetId) {
-<<<<<<< Updated upstream
                     const match = EFFECT_PRESETS.find((p: { name: string }) => p.name === savedPresetId);
-=======
-                    const match = EFFECT_PRESETS.find((p) => p.name === savedPresetId);
->>>>>>> Stashed changes
                     if (match) {
                         layer.effects.preset = match;
                         layer.effects.engine.setPreset(match);
@@ -652,8 +620,11 @@ export default function LEDBoard() {
 
     const canvasRedraw = useCallback(() => canvasHandleRef.current?.redraw(), []);
 
-    // useBoardActions: drawing, text, pattern logic
-    const { applyTool, handleApplyPattern, handleRenderText, replayLayers } = useBoardActions({
+    // useBoardActions: only replayLayers is consumed here. The action-recording-aware
+    // applyTool / handleApplyPattern / handleRenderText are defined inline below (they
+    // integrate recordAction / recordLayerSync), so we intentionally don't take them
+    // from the hook to avoid redeclaration.
+    const { replayLayers } = useBoardActions({
         layerManagerRef, animRef, effectsRef, snapshotRef, contentLayersRef,
         saveGridToStorageRef, activeTool, activeColor,
         backgroundColor: settings.backgroundColor, activePaletteId,
@@ -753,14 +724,10 @@ export default function LEDBoard() {
             // Keep ALL layers' animation managers and effects engines in sync
             const mgr = layerManagerRef.current;
             if (mgr) {
-<<<<<<< Updated upstream
                 for (const layer of mgr.layers) {
                     layer.animation.manager.updateGrid(newCols, newRows, layer.grid.data);
                     layer.effects.engine.updateGrid(newCols, newRows);
                 }
-=======
-                mgr.updateLayerEngines(newCols, newRows);
->>>>>>> Stashed changes
             }
             syncActiveLayerState();
 
@@ -967,7 +934,6 @@ export default function LEDBoard() {
         recordLayerSync();
     }, [handleLayerChange, recordLayerSync, syncActiveLayerState]);
 
-<<<<<<< Updated upstream
     const selectLayerAtCell = useCallback((col: number, row: number) => {
         const manager = layerManagerRef.current;
         const targetLayer = manager?.pickLayerAt(col, row);
@@ -1077,34 +1043,6 @@ export default function LEDBoard() {
         [activeTool, activeColor, settings.backgroundColor],
     );
 
-=======
-        pushUndo();
-
-        const len = grid.cols * grid.rows * 3;
-        for (let i = 0; i < len; i += 3) {
-            const r = grid.data[i];
-            const g = grid.data[i + 1];
-            const b = grid.data[i + 2];
-            if (r === 0 && g === 0 && b === 0) continue;
-
-            let bestDist = Infinity;
-            let bestColor = palette.colors[0];
-            for (const pc of palette.colors) {
-                const dr = r - pc[0];
-                const dg = g - pc[1];
-                const db = b - pc[2];
-                const dist = dr * dr + dg * dg + db * db;
-                if (dist < bestDist) { bestDist = dist; bestColor = pc; if (dist === 0) break; }
-            }
-            grid.data[i] = bestColor[0];
-            grid.data[i + 1] = bestColor[1];
-            grid.data[i + 2] = bestColor[2];
-        }
-        canvasHandleRef.current?.redraw();
-        saveGridToStorage();
-    }, [activePaletteId, pushUndo, saveGridToStorage]);
-
->>>>>>> Stashed changes
     // ── Hover callback ────────────────────────────────────
     const applyToolToCell = useCallback(
         (tool: ToolKind, col: number, row: number, forcedColor?: RGB) => {
@@ -1382,7 +1320,6 @@ export default function LEDBoard() {
         });
     }, []);
 
-<<<<<<< Updated upstream
     // ── Clear board (full reset) ─────────────────────────────
     const clearCanvas = useCallback(() => {
         const manager = layerManagerRef.current;
@@ -1411,27 +1348,6 @@ export default function LEDBoard() {
         setCanUndo(false);
 
         syncActiveLayerState();
-=======
-    const clearBoard = useCallback(() => {
-        pushUndo();
-        if (animRef.current && animRef.current.state !== "stopped") { animRef.current.stop(); }
-        setCurrentAnim(null);
-        setAnimFrame(0);
-        try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
-        effectsRef.current?.clearEffects();
-        snapshotRef.current = null;
-        contentLayersRef.current = [];
-        setMarqueeBuffer(null);
-        if (sessionRecRef.current.state === "playing" || sessionRecRef.current.state === "paused") {
-            sessionRecRef.current.stopPlayback();
-        }
-        strokeRecorder.clear();
-        strokeRecorder.resume();
-        const manager = layerManagerRef.current;
-        if (manager) { for (const layer of manager.layers) { layer.grid.clear(); } }
-        undoStackRef.current = [];
-        setCanUndo(false);
->>>>>>> Stashed changes
         canvasHandleRef.current?.redraw();
         saveGridToStorage();
         recordAction({ type: "clear" });
@@ -1522,7 +1438,6 @@ export default function LEDBoard() {
         syncActiveLayerState,
     ]);
 
-<<<<<<< Updated upstream
     // ── Quantize buffer to active palette ─────────────────
     const handleGestureSwipeClear = useCallback(() => {
         clearCanvas();
@@ -1725,9 +1640,6 @@ export default function LEDBoard() {
         },
         [pushUndo, saveGridToStorage, replayLayers, quantizeBuffer, activePaletteId, recordAction],
     );
-=======
-    // handleRenderText is provided by useBoardActions (see line ~385)
->>>>>>> Stashed changes
 
     // ── Animation controls ────────────────────────────────
     const handleSelectAnimation = useCallback((anim: AnimationConfig) => {
@@ -1759,14 +1671,9 @@ export default function LEDBoard() {
         setAnimFps(anim.fps);
         setAnimFrame(0);
         mgr.play();
-<<<<<<< Updated upstream
         const layerId = activeLayer.id;
         recordAction({ type: "animation", layerId, name: anim.name, action: "play", fps: anim.fps });
     }, [recordAction]);
-=======
-        setAnimState(mgr.state);
-    }, []);
->>>>>>> Stashed changes
 
     const handleAnimPlay = useCallback(() => {
         const activeLayer = layerManagerRef.current?.getActiveLayer();
@@ -1778,7 +1685,6 @@ export default function LEDBoard() {
                 activeLayer.animation.snapshot = snapshotRef.current;
             }
         }
-<<<<<<< Updated upstream
         const mgr = animRef.current;
         if (!mgr) return;
         mgr.play();
@@ -1819,16 +1725,6 @@ export default function LEDBoard() {
             });
         }
     }, [recordAction]);
-=======
-        animRef.current?.play();
-        if (animRef.current) setAnimState(animRef.current.state);
-    }, []);
-
-    const handleAnimPause = useCallback(() => {
-        animRef.current?.pause();
-        if (animRef.current) setAnimState(animRef.current.state);
-    }, []);
->>>>>>> Stashed changes
 
     const handleAnimStop = useCallback(() => {
         const activeLayer = layerManagerRef.current?.getActiveLayer();
@@ -1866,7 +1762,6 @@ export default function LEDBoard() {
         setAnimFps(fps);
         animRef.current?.setFps(fps);
         const activeLayer = layerManagerRef.current?.getActiveLayer();
-<<<<<<< Updated upstream
         if (activeLayer) {
             activeLayer.animation.fps = fps;
             recordAction({
@@ -1878,10 +1773,6 @@ export default function LEDBoard() {
             });
         }
     }, [recordAction]);
-=======
-        if (activeLayer) activeLayer.animation.fps = fps;
-    }, []);
->>>>>>> Stashed changes
 
     // ── Effects controls ──────────────────────────────────
     const handleToggleEffects = useCallback(() => {
@@ -1968,7 +1859,6 @@ export default function LEDBoard() {
     }, [recordAction]);
 
     // ── Session recording controls ────────────────────────
-<<<<<<< Updated upstream
     const applyRecordedAction = useCallback((action: ActionEvent) => {
         isApplyingRecordedActionRef.current = true;
         try {
@@ -2160,33 +2050,6 @@ export default function LEDBoard() {
         setFrameRecHasRecording,
         setFrameRecPlaybackFrame,
     ]);
-=======
-    const handleStartRecording = useCallback(() => {
-        const rec = sessionRecRef.current;
-        const grid = layerManagerRef.current?.getActiveLayer()?.grid;
-        if (!grid) return;
-        rec.configure({
-            cols: grid.cols,
-            rows: grid.rows,
-            captureFps: 30,
-            getGridData: getCompositeGridWithEffects,
-            setGridData: (data: Uint8ClampedArray) => {
-                layerManagerRef.current?.getActiveLayer()?.grid.loadData(data);
-            },
-            redraw: () => canvasHandleRef.current?.redraw(),
-            onStateChange: (state: RecordingState) => {
-                setRecordingState(state);
-                setRecHasRecording(rec.hasRecording);
-            },
-            onPlaybackFrame: (frame: number) => {
-                setRecPlaybackFrame(frame);
-            },
-        });
-        rec.startRecording();
-        setRecFrameCount(0);
-        setRecDuration(0);
-    }, [getCompositeGridWithEffects]);
->>>>>>> Stashed changes
 
     const handleStopRecording = useCallback(() => {
         if (recordingMode === "action") {
@@ -2492,12 +2355,8 @@ export default function LEDBoard() {
                 onToggleGestureCamera={() => setGestureShowCamera((v) => !v)}
                 panelRef={panelRef}
                 exportRecorder={sessionRecorder}
-<<<<<<< Updated upstream
                 exportGetGridData={getDisplayGridData}
                 exportHasRecording={frameRecHasRecording}
-=======
-                exportGetGridData={getCompositeGridWithEffects}
->>>>>>> Stashed changes
                 activePaletteId={activePaletteId}
                 onSelectPalette={handlePaletteChange}
             />
