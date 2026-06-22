@@ -406,6 +406,15 @@ export class LayerManager {
             layer.effects.engine.setDistanceMultiplier(serialized.effects.distanceMultiplier);
             layer.effects.engine.setSpeedMultiplier(serialized.effects.speedMultiplier);
             layer.effects.overlay = layer.effects.engine.overlay;
+            if (serialized.physics) {
+                layer.physics.gravityY = serialized.physics.gravityY;
+                layer.physics.restitution = serialized.physics.restitution;
+                layer.physics.preset = (serialized.physics.preset as PresetName | null) ?? null;
+                // Restore physics *settings* only; never auto-resume the live sim on load.
+                layer.physics.enabled = false;
+                layer.physics.snapshot = null;
+                layer.physics.world = null;
+            }
             this.layers.push(layer);
         }
 

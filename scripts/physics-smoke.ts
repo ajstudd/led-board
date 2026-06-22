@@ -10,7 +10,10 @@
  *   3. pixelize/rasterize round-trips a static scene.
  *   4. gravityDrop is stable: particles fall, settle in bounds, no NaN.
  */
-import { PhysicsWorld, explode, scatter, gravityDrop, applyPreset, BodyType } from "../app/lib/physics/index";
+import {
+  PhysicsWorld, explode, scatter, gravityDrop, applyPreset, BodyType,
+  bakeSimulation, springEasing, bounceEasing, dampedOscillation, easeInOutCubic,
+} from "../app/lib/physics/index";
 
 let failures = 0;
 function check(name: string, cond: boolean) {
@@ -119,6 +122,42 @@ check("seeds matter: different seed ⇒ different scatter result", d1 !== d2);
   let restored = true;
   for (let i = 0; i < data.length; i++) if (data[i] !== snapshot[i]) { restored = false; break; }
   check("lifecycle: disable restores the original drawing", restored);
+}
+
+// 6. Easings — boundary behaviour
+{
+  const spring = springEasing();
+  const bounce = bounceEasing();
+  const damped = dampedOscillation();
+  const near = (a: number, b: number, eps = 0.06) => Math.abs(a - b) < eps;
+  check("easing: spring starts at 0 and settles near 1", spring(0) === 0 && near(spring(1), 1));
+  check("easing: bounce spans 0 → 1", bounce(0) === 0 && near(bounce(1), 1));
+  check("easing: damped starts at 0 and settles near 1", near(damped(0), 0) && near(damped(1), 1));
+  check("easing: easeInOutCubic midpoint is 0.5", near(easeInOutCubic(0.5), 0.5, 1e-9));
+  const allFinite = [spring, bounce, damped].every((fn) =>
+    [0, 0.25, 0.5, 0.75, 1].every((t) => Number.isFinite(fn(t))));
+  check("easing: all outputs finite", allFinite);
+}
+
+// 7. Bake — deterministic clip
+function bakeRun(seed: number): Uint8ClampedArray[] {
+  const { data, cols, rows } = makeGrid();
+  const world = new PhysicsWorld({ seed });
+  world.pixelize(data, cols, rows);
+  explode(world);
+  return bakeSimulation(world, cols, rows, 20, 30).frames;
+}
+{
+  const b1 = bakeRun(77);
+  const b2 = bakeRun(77);
+  check("bake: produces requested frame count", b1.length === 20);
+  let identical = b1.length === b2.length;
+  for (let f = 0; identical && f < b1.length; f++) {
+    for (let i = 0; i < b1[f].length; i++) if (b1[f][i] !== b2[f][i]) { identical = false; break; }
+  }
+  check("bake: same seed ⇒ identical clip", identical);
+  const moved = b1[0].some((v, i) => v !== b1[b1.length - 1][i]);
+  check("bake: first and last frame differ (motion captured)", moved);
 }
 
 console.log(`\n${failures === 0 ? "ALL PASSED ✅" : `${failures} FAILED ❌`}`);

@@ -390,6 +390,133 @@ export async function exportAsVideo(
   return blob;
 }
 
+// ── Frame-array export (deterministic sources, e.g. baked physics) ─────────
+// These take a ready-made list of full RGB grid frames (already at target fps)
+// instead of a SessionRecorder, so deterministic sources like a baked physics
+// simulation can be exported frame-exact without going through live recording.
+
+/** Encode a list of RGB grid frames as an animated GIF. */
+export async function exportFramesAsGif(
+  frames: Uint8ClampedArray[],
+  cols: number,
+  rows: number,
+  options: ExportOptions,
+  onProgress?: (p: ExportProgress) => void,
+): Promise<Blob> {
+  if (frames.length === 0) throw new Error("No frames to export");
+  const scale = options.scale || 1;
+  const width = cols * scale;
+  const height = rows * scale;
+  const transparent = options.transparent ?? false;
+  const bg = options.backgroundColor ?? [0, 0, 0];
+  const frameDuration = 1000 / (options.fps || 30);
+
+  const encoder = new GifEncoder({
+    width,
+    height,
+    delay: frameDuration,
+    loop: options.loop ?? 0,
+    transparentColor: transparent ? [0, 0, 0] : undefined,
+  });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d")!;
+
+  for (let i = 0; i < frames.length; i++) {
+    const data = frames[i];
+    const src = document.createElement("canvas");
+    src.width = cols;
+    src.height = rows;
+    const srcCtx = src.getContext("2d")!;
+    const imgData = srcCtx.createImageData(cols, rows);
+    const px = imgData.data;
+    for (let p = 0, j = 0; p < cols * rows; p++, j += 4) {
+      const si = p * 3;
+      const r = data[si], g = data[si + 1], b = data[si + 2];
+      const isBlack = r === 0 && g === 0 && b === 0;
+      if (transparent && isBlack) {
+        px[j] = 0; px[j + 1] = 0; px[j + 2] = 0; px[j + 3] = 0;
+      } else if (!transparent && isBlack) {
+        px[j] = bg[0]; px[j + 1] = bg[1]; px[j + 2] = bg[2]; px[j + 3] = 255;
+      } else {
+        px[j] = r; px[j + 1] = g; px[j + 2] = b; px[j + 3] = 255;
+      }
+    }
+    srcCtx.putImageData(imgData, 0, 0);
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(src, 0, 0, width, height);
+    encoder.addFrame(ctx.getImageData(0, 0, width, height).data);
+
+    onProgress?.({
+      percent: ((i + 1) / frames.length) * 95,
+      status: `Encoding frame ${i + 1}/${frames.length}...`,
+    });
+  }
+
+  const blob = encoder.finish();
+  onProgress?.({ percent: 100, status: "Done!" });
+  return blob;
+}
+
+/** Encode a list of RGB grid frames as WebM video. */
+export async function exportFramesAsVideo(
+  frames: Uint8ClampedArray[],
+  cols: number,
+  rows: number,
+  options: ExportOptions,
+  onProgress?: (p: ExportProgress) => void,
+): Promise<Blob> {
+  if (frames.length === 0) throw new Error("No frames to export");
+  const scale = options.scale || 1;
+  const width = cols * scale;
+  const height = rows * scale;
+  const bg = options.backgroundColor ?? [0, 0, 0];
+  const targetFps = options.fps || 30;
+
+  const videoFrames = frames.map((data) => {
+    if (scale === 1) {
+      const out = new Uint8ClampedArray(data.length);
+      for (let i = 0; i < data.length; i += 3) {
+        if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 0) {
+          out[i] = bg[0]; out[i + 1] = bg[1]; out[i + 2] = bg[2];
+        } else {
+          out[i] = data[i]; out[i + 1] = data[i + 1]; out[i + 2] = data[i + 2];
+        }
+      }
+      return { data: out, width, height };
+    }
+    const scaled = new Uint8ClampedArray(width * height * 3);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const sx = Math.floor(x / scale);
+        const sy = Math.floor(y / scale);
+        const si = (sy * cols + sx) * 3;
+        const di = (y * width + x) * 3;
+        const r = data[si], g = data[si + 1], b = data[si + 2];
+        if (r === 0 && g === 0 && b === 0) {
+          scaled[di] = bg[0]; scaled[di + 1] = bg[1]; scaled[di + 2] = bg[2];
+        } else {
+          scaled[di] = r; scaled[di + 1] = g; scaled[di + 2] = b;
+        }
+      }
+    }
+    return { data: scaled, width, height };
+  });
+
+  onProgress?.({ percent: 10, status: `Encoding ${videoFrames.length} frames as WebM...` });
+  const blob = await encodeVideo(
+    videoFrames,
+    { width, height, fps: targetFps, bitrate: options.bitrate ?? 2_000_000 },
+    (pct) => onProgress?.({ percent: 10 + pct * 0.85, status: `Encoding video... ${Math.round(pct)}%` }),
+  );
+  onProgress?.({ percent: 100, status: "Done!" });
+  return blob;
+}
+
 // ── Download helper ──────────────────────────────────────
 
 /**

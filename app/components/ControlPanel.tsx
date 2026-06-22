@@ -128,6 +128,8 @@ interface ControlPanelProps {
     onPhysicsGravityChange: (v: number) => void;
     onPhysicsBounceChange: (v: number) => void;
     onResetPhysics: () => void;
+    onBakePhysics: (frames: number) => void;
+    getSimulationFrames?: (frameCount: number, fps: number) => { frames: Uint8ClampedArray[]; cols: number; rows: number } | null;
     // Gesture
     gestureEnabled: boolean;
     onToggleGesture: () => void;
@@ -300,6 +302,8 @@ export default function ControlPanel({
     onPhysicsGravityChange,
     onPhysicsBounceChange,
     onResetPhysics,
+    onBakePhysics,
+    getSimulationFrames,
     gestureEnabled,
     onToggleGesture,
     gestureVideoRef,
@@ -562,6 +566,7 @@ export default function ControlPanel({
                             onGravityChange={onPhysicsGravityChange}
                             onBounceChange={onPhysicsBounceChange}
                             onReset={onResetPhysics}
+                            onBake={onBakePhysics}
                         />
                     </AccordionSection>
 
@@ -666,6 +671,8 @@ export default function ControlPanel({
                             getGridData={exportGetGridData}
                             recorder={exportRecorder}
                             hasRecording={exportHasRecording}
+                            getSimulationFrames={getSimulationFrames}
+                            simulationAvailable={physicsEnabled}
                         />
                     </AccordionSection>
                 </div>

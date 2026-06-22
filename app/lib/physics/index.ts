@@ -71,3 +71,13 @@ export {
   applyPreset,
 } from "./presets";
 export type { PresetName, ExplodeOptions } from "./presets";
+export {
+  springEasing,
+  bounceEasing,
+  dampedOscillation,
+  easeLinear,
+  easeInOutCubic,
+} from "./easings";
+export type { EasingFunction } from "./easings";
+export { bakeSimulation } from "./baker";
+export type { BakedClip } from "./baker";

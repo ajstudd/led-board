@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { PresetName } from "../lib/physics/presets";
 import InfoTooltip from "./InfoTooltip";
 
@@ -13,6 +14,7 @@ interface PhysicsPanelProps {
     onGravityChange: (v: number) => void;
     onBounceChange: (v: number) => void;
     onReset: () => void;
+    onBake: (frames: number) => void;
 }
 
 const PRESETS: { name: PresetName; label: string }[] = [
@@ -36,7 +38,9 @@ export default function PhysicsPanel({
     onGravityChange,
     onBounceChange,
     onReset,
+    onBake,
 }: PhysicsPanelProps) {
+    const [bakeFrames, setBakeFrames] = useState(90);
     return (
         <div className="flex flex-col gap-2.5">
             <div className="flex items-center gap-1.5">
@@ -111,6 +115,33 @@ export default function PhysicsPanel({
                     >
                         ↺ Reset to Drawing
                     </button>
+
+                    <div className="h-px bg-white/10" />
+
+                    <div className="flex items-center gap-2">
+                        <span className="w-12 shrink-0 text-[10px] text-white/40">Frames</span>
+                        <input
+                            type="range"
+                            min={15}
+                            max={240}
+                            step={15}
+                            value={bakeFrames}
+                            onChange={(e) => setBakeFrames(Number(e.target.value))}
+                            className="h-1 min-w-0 flex-1 cursor-pointer accent-amber-500"
+                        />
+                        <span className="w-8 shrink-0 text-right text-[10px] text-white/60">{bakeFrames}</span>
+                    </div>
+                    <button
+                        onClick={() => onBake(bakeFrames)}
+                        className="rounded-md border border-amber-400/30 bg-amber-500/14 px-2 py-1.5 text-[10px] font-medium text-amber-200 transition hover:bg-amber-500/22"
+                        title="Freeze the simulation into a looping animation you can play, record and export"
+                    >
+                        ⤓ Bake to Animation ({(bakeFrames / 30).toFixed(1)}s)
+                    </button>
+
+                    <p className="text-[9px] leading-snug text-white/35">
+                        Tip: export this simulation as GIF/WebM from the <span className="text-white/55">Session &amp; Rendering › Export</span> section (set Source to “Simulation”).
+                    </p>
                 </>
             )}
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import InfoTooltip from "./InfoTooltip";
 import {
   ExportFormat,
@@ -9,6 +9,8 @@ import {
   exportAsSvg,
   exportAsGif,
   exportAsVideo,
+  exportFramesAsGif,
+  exportFramesAsVideo,
   downloadBlob,
 } from "../lib/exporter";
 import { SessionRecorder } from "../lib/sessionRecorder";
@@ -22,11 +24,23 @@ interface ExportPanelProps {
   rows: number;
   /** Current grid data (for single-frame export) */
   getGridData: () => Uint8ClampedArray | null;
-  /** Session recorder (for animated export) */
+  /** Session recorder (for animated export from a recorded session) */
   recorder: SessionRecorder;
   /** Whether a recording exists */
   hasRecording: boolean;
+  /**
+   * Deterministic physics-sim frame source. Present means the active layer can
+   * be exported directly as a simulation (no recording needed).
+   */
+  getSimulationFrames?: (
+    frameCount: number,
+    fps: number,
+  ) => { frames: Uint8ClampedArray[]; cols: number; rows: number } | null;
+  /** True when physics is enabled on the active layer. */
+  simulationAvailable?: boolean;
 }
+
+type ExportSource = "board" | "simulation";
 
 // ── Constants ────────────────────────────────────────────
 
@@ -47,7 +61,11 @@ export default function ExportPanel({
   getGridData,
   recorder,
   hasRecording,
+  getSimulationFrames,
+  simulationAvailable = false,
 }: ExportPanelProps) {
+  const [source, setSource] = useState<ExportSource>("board");
+  const [simFrames, setSimFrames] = useState(90);
   const [format, setFormat] = useState<ExportFormat>("png");
   const [scale, setScale] = useState(2);
   const [fps, setFps] = useState(15);
@@ -58,9 +76,15 @@ export default function ExportPanel({
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef(false);
 
+  // Can't keep "simulation" selected once physics is off.
+  useEffect(() => {
+    if (!simulationAvailable && source === "simulation") setSource("board");
+  }, [simulationAvailable, source]);
+
   const selectedFormat = FORMAT_OPTIONS.find((f) => f.value === format)!;
   const isAnimated = selectedFormat.animated;
-  const canExportAnimated = hasRecording;
+  // Animated export: from a recording (board) or directly from the sim.
+  const canExportAnimated = source === "simulation" ? simulationAvailable : hasRecording;
 
   // Video capability detection
   const videoSupported = hasWebCodecs() || hasMediaRecorder();
@@ -106,26 +130,35 @@ export default function ExportPanel({
           break;
         }
         case "gif": {
-          if (!canExportAnimated) throw new Error("Record a session first");
-          blob = await exportAsGif(recorder, cols, rows, {
-            format: "gif",
-            scale,
-            fps,
-            loop,
-            transparent,
-          }, onProgress);
+          if (source === "simulation") {
+            const sim = getSimulationFrames?.(simFrames, fps);
+            if (!sim || sim.frames.length === 0) throw new Error("Enable Physics on a layer with content first");
+            blob = await exportFramesAsGif(sim.frames, sim.cols, sim.rows, {
+              format: "gif", scale, fps, loop, transparent,
+            }, onProgress);
+          } else {
+            if (!canExportAnimated) throw new Error("Record a session first");
+            blob = await exportAsGif(recorder, cols, rows, {
+              format: "gif", scale, fps, loop, transparent,
+            }, onProgress);
+          }
           filename = `tenix-${timestamp}.gif`;
           break;
         }
         case "webm": {
-          if (!canExportAnimated) throw new Error("Record a session first");
           if (!videoSupported) throw new Error("Video encoding not supported in this browser");
-          blob = await exportAsVideo(recorder, cols, rows, {
-            format: "webm",
-            scale,
-            fps,
-            transparent,
-          }, onProgress);
+          if (source === "simulation") {
+            const sim = getSimulationFrames?.(simFrames, fps);
+            if (!sim || sim.frames.length === 0) throw new Error("Enable Physics on a layer with content first");
+            blob = await exportFramesAsVideo(sim.frames, sim.cols, sim.rows, {
+              format: "webm", scale, fps, transparent,
+            }, onProgress);
+          } else {
+            if (!canExportAnimated) throw new Error("Record a session first");
+            blob = await exportAsVideo(recorder, cols, rows, {
+              format: "webm", scale, fps, transparent,
+            }, onProgress);
+          }
           filename = `tenix-${timestamp}.webm`;
           break;
         }
@@ -144,7 +177,7 @@ export default function ExportPanel({
     } finally {
       setIsExporting(false);
     }
-  }, [format, scale, fps, loop, transparent, cols, rows, getGridData, recorder, canExportAnimated, videoSupported]);
+  }, [format, scale, fps, loop, transparent, cols, rows, getGridData, recorder, canExportAnimated, videoSupported, source, simFrames, getSimulationFrames]);
 
   const handleCancel = useCallback(() => {
     abortRef.current = true;
@@ -175,6 +208,29 @@ export default function ExportPanel({
           </ul>
         </InfoTooltip>
       </div>
+
+      {/* Source selector — only when a physics sim is available */}
+      {simulationAvailable && (
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-white/40">Source</span>
+          <div className="flex gap-1">
+            {(["board", "simulation"] as ExportSource[]).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSource(s)}
+                className={`rounded px-2 py-0.5 text-[10px] capitalize transition ${
+                  source === s
+                    ? "bg-green-500/30 text-green-300"
+                    : "bg-white/5 text-white/60 hover:bg-white/10"
+                }`}
+                title={s === "simulation" ? "Export the active layer's physics simulation (deterministic, no recording needed)" : "Export the board / recorded session"}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Format selector */}
       <div className="flex gap-1">
@@ -234,6 +290,24 @@ export default function ExportPanel({
       {/* Animated-only options */}
       {isAnimated && (
         <div className="flex flex-col gap-1.5 pl-1 border-l border-white/10">
+          {/* Simulation length (sim source only) */}
+          {source === "simulation" && (
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-white/40">Length</span>
+              <input
+                type="range"
+                min={15}
+                max={240}
+                step={15}
+                value={simFrames}
+                onChange={(e) => setSimFrames(parseInt(e.target.value, 10))}
+                className="w-16 accent-green-400 cursor-pointer"
+              />
+              <span className="text-[10px] text-white/60 w-10 text-right tabular-nums">
+                {(simFrames / fps).toFixed(1)}s
+              </span>
+            </div>
+          )}
           {/* FPS */}
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-white/40">FPS</span>

@@ -1,10 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import type { AnimationConfig } from "../types";
 import type { LayerManager, Layer } from "../lib/layerManager";
 import { PhysicsWorld } from "../lib/physics/world";
 import { applyPreset, PresetName } from "../lib/physics/presets";
+import { bakeSimulation, BakedClip } from "../lib/physics/baker";
 import { Vec2 } from "../lib/physics/math";
+
+/** Wrap a baked physics clip as an AnimationConfig the layer can play/loop. */
+function createBakedAnimation(clip: BakedClip): AnimationConfig {
+  const { frames, frameCount } = clip;
+  return {
+    name: "Physics Bake",
+    fps: clip.fps,
+    tick: (_cols: number, _rows: number, data: Uint8ClampedArray, frame: number) => {
+      if (frameCount === 0) return;
+      const f = ((frame % frameCount) + frameCount) % frameCount;
+      const src = frames[f];
+      if (src.length === data.length) data.set(src);
+    },
+  };
+}
 
 interface UsePhysicsEngineOptions {
   layerManagerRef: React.RefObject<LayerManager | null>;
@@ -162,7 +179,81 @@ export function usePhysicsEngine({ layerManagerRef, onRedraw }: UsePhysicsEngine
     ensureRunning();
   }, [layerManagerRef, primeWorld, ensureRunning]);
 
+  /**
+   * Freeze the active layer's simulation into a looping animation clip. Restarts
+   * the sim from the clean drawing, runs `frameCount` frames, then hands back an
+   * AnimationConfig (+ the original drawing for restore-on-stop). The caller
+   * loads it into the layer's AnimationManager so it flows through the existing
+   * playback/record/export pipeline.
+   */
+  const bakeActiveLayer = useCallback(
+    (frameCount = 90, fps = 30): { config: AnimationConfig; drawing: Uint8ClampedArray } | null => {
+      const target = layerManagerRef.current?.getActiveLayer();
+      if (!target) return null;
+      const ph = target.physics;
+      if (!ph.world || !ph.snapshot) return null;
+      const drawing = new Uint8ClampedArray(ph.snapshot);
+      primeWorld(target, drawing);
+      if (ph.preset) applyPreset(ph.world, ph.preset);
+      const clip = bakeSimulation(ph.world, target.grid.cols, target.grid.rows, frameCount, fps);
+      // physics is now baked into frames — turn off the live sim
+      ph.enabled = false;
+      ph.world.clear();
+      target.grid.loadData(drawing);
+      return { config: createBakedAnimation(clip), drawing };
+    },
+    [layerManagerRef, primeWorld],
+  );
+
+  /**
+   * Deterministically bake the active layer's simulation into full-board frames
+   * for export. Uses a throwaway world (the live sim is untouched) and composites
+   * each frame over the other visible layers. Returns null if there's nothing to
+   * simulate.
+   */
+  const getSimulationFrames = useCallback(
+    (frameCount = 90, fps = 30): { frames: Uint8ClampedArray[]; cols: number; rows: number } | null => {
+      const manager = layerManagerRef.current;
+      const layer = manager?.getActiveLayer();
+      if (!manager || !layer) return null;
+      const ph = layer.physics;
+      const drawing = ph.snapshot ?? layer.grid.cloneData();
+      const cols = layer.grid.cols;
+      const rows = layer.grid.rows;
+
+      // Throwaway world with the same deterministic config as the live sim.
+      const temp = new PhysicsWorld({
+        seed: 1,
+        gravity: new Vec2(0, ph.gravityY),
+        defaultRestitution: ph.restitution,
+      });
+      temp.pixelize(drawing, cols, rows);
+      if (ph.preset) applyPreset(temp, ph.preset);
+      const clip = bakeSimulation(temp, cols, rows, frameCount, fps);
+
+      // Composite each baked frame over the other visible layers.
+      const wasVisible = layer.visible;
+      layer.visible = false;
+      const bg = manager.composite();
+      layer.visible = wasVisible;
+
+      const frames = clip.frames.map((f) => {
+        const out = new Uint8ClampedArray(bg);
+        for (let i = 0; i < f.length; i += 3) {
+          if (f[i] !== 0 || f[i + 1] !== 0 || f[i + 2] !== 0) {
+            out[i] = f[i];
+            out[i + 1] = f[i + 1];
+            out[i + 2] = f[i + 2];
+          }
+        }
+        return out;
+      });
+      return { frames, cols, rows };
+    },
+    [layerManagerRef],
+  );
+
   useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
 
-  return { enable, disable, applyPresetToActive, setConfig, reset };
+  return { enable, disable, applyPresetToActive, setConfig, reset, bakeActiveLayer, getSimulationFrames };
 }

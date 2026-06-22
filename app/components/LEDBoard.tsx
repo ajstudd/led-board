@@ -248,12 +248,24 @@ export default function LEDBoard() {
             visible: layer.visible,
             opacity: layer.opacity,
             blendMode: layer.blendMode,
-            data: uint8ToBase64(layer.grid.data),
+            // When physics is live the grid holds a mid-sim frame; persist the
+            // original drawing (snapshot) so reloads restore the source, not a frame.
+            data: uint8ToBase64(
+                layer.physics.enabled && layer.physics.snapshot
+                    ? layer.physics.snapshot
+                    : layer.grid.data,
+            ),
             effects: {
                 enabled: layer.effects.enabled,
                 presetName: layer.effects.preset.name,
                 distanceMultiplier: layer.effects.distanceMultiplier,
                 speedMultiplier: layer.effects.speedMultiplier,
+            },
+            physics: {
+                enabled: layer.physics.enabled,
+                preset: layer.physics.preset,
+                gravityY: layer.physics.gravityY,
+                restitution: layer.physics.restitution,
             },
         }));
     }, []);
@@ -640,31 +652,72 @@ export default function LEDBoard() {
             const layer = layerManagerRef.current?.getActiveLayer();
             setPhysicsPreset(layer?.physics.preset ?? null);
             setAnimState(layer?.animation.manager.state ?? "stopped");
+            if (layer) recordAction({ type: "physics", layerId: layer.id, op: next ? "enable" : "disable" });
             return next;
         });
-    }, [physics, layerManagerRef]);
+    }, [physics, layerManagerRef, recordAction]);
 
     const handleApplyPhysicsPreset = useCallback((name: PresetName) => {
         physics.applyPresetToActive(name);
         setPhysicsEnabled(true);
         setPhysicsPreset(name);
-        setAnimState(layerManagerRef.current?.getActiveLayer()?.animation.manager.state ?? "stopped");
-    }, [physics, layerManagerRef]);
+        const layer = layerManagerRef.current?.getActiveLayer();
+        setAnimState(layer?.animation.manager.state ?? "stopped");
+        if (layer) recordAction({ type: "physics", layerId: layer.id, op: "preset", preset: name });
+    }, [physics, layerManagerRef, recordAction]);
 
     const handlePhysicsGravityChange = useCallback((v: number) => {
         setPhysicsGravity(v);
         physics.setConfig({ gravityY: v });
-    }, [physics]);
+        const layer = layerManagerRef.current?.getActiveLayer();
+        if (layer) recordAction({ type: "physics", layerId: layer.id, op: "config", gravityY: v, restitution: layer.physics.restitution });
+    }, [physics, layerManagerRef, recordAction]);
 
     const handlePhysicsBounceChange = useCallback((v: number) => {
         setPhysicsBounce(v);
         physics.setConfig({ restitution: v });
-    }, [physics]);
+        const layer = layerManagerRef.current?.getActiveLayer();
+        if (layer) recordAction({ type: "physics", layerId: layer.id, op: "config", gravityY: layer.physics.gravityY, restitution: v });
+    }, [physics, layerManagerRef, recordAction]);
 
     const handleResetPhysics = useCallback(() => {
         physics.reset();
         setPhysicsPreset(null);
-    }, [physics]);
+        const layer = layerManagerRef.current?.getActiveLayer();
+        if (layer) recordAction({ type: "physics", layerId: layer.id, op: "reset" });
+    }, [physics, layerManagerRef, recordAction]);
+
+    // Freeze the live simulation into a looping animation that flows through the
+    // normal animation playback/record/export pipeline (mirrors handleSelectAnimation).
+    const handleBakePhysics = useCallback((frames: number) => {
+        const result = physics.bakeActiveLayer(frames, 30);
+        if (!result) return;
+        const { config, drawing } = result;
+        const activeLayer = layerManagerRef.current?.getActiveLayer();
+        const grid = activeLayer?.grid;
+        const mgr = animRef.current;
+        if (!grid || !mgr || !activeLayer) return;
+
+        strokeRecorder.pause();
+        // the original drawing is what we restore when the baked animation stops
+        snapshotRef.current = new Uint8ClampedArray(drawing);
+        setActiveLayerMarqueeBuffer(null);
+        captureActiveLayerSnapshot(snapshotRef.current);
+
+        mgr.load(config, grid.cols, grid.rows, grid.data, activeLayer.animation);
+        activeLayer.animation.currentAnim = config;
+        activeLayer.animation.snapshot = snapshotRef.current;
+        activeLayer.animation.fps = config.fps;
+        activeLayer.animation.frame = 0;
+
+        setPhysicsEnabled(false);
+        setCurrentAnim(config);
+        try { localStorage.removeItem(STORAGE_KEY_ANIM); } catch { }
+        setAnimState("playing");
+        setAnimFps(config.fps);
+        setAnimFrame(0);
+        mgr.play();
+    }, [physics, layerManagerRef, captureActiveLayerSnapshot, setActiveLayerMarqueeBuffer]);
 
     // useBoardActions: only replayLayers is consumed here. The action-recording-aware
     // applyTool / handleApplyPattern / handleRenderText are defined inline below (they
@@ -1950,6 +2003,36 @@ export default function LEDBoard() {
                     selectLayerRuntime(action.layerId);
                     effectsRef.current?.trigger(action.col, action.row, action.color);
                     break;
+                case "physics": {
+                    selectLayerRuntime(action.layerId);
+                    switch (action.op) {
+                        case "enable":
+                            physics.enable();
+                            setPhysicsEnabled(true);
+                            break;
+                        case "disable":
+                            physics.disable();
+                            setPhysicsEnabled(false);
+                            break;
+                        case "preset":
+                            if (action.preset) {
+                                physics.applyPresetToActive(action.preset as PresetName);
+                                setPhysicsEnabled(true);
+                                setPhysicsPreset(action.preset as PresetName);
+                            }
+                            break;
+                        case "config":
+                            physics.setConfig({ gravityY: action.gravityY, restitution: action.restitution });
+                            if (typeof action.gravityY === "number") setPhysicsGravity(action.gravityY);
+                            if (typeof action.restitution === "number") setPhysicsBounce(action.restitution);
+                            break;
+                        case "reset":
+                            physics.reset();
+                            setPhysicsPreset(null);
+                            break;
+                    }
+                    break;
+                }
                 case "animation": {
                     selectLayerRuntime(action.layerId);
                     if (action.action === "stop") {
@@ -2023,6 +2106,7 @@ export default function LEDBoard() {
         handleSelectEffectPreset,
         handleToggleEffects,
         handleToolChange,
+        physics,
         selectLayerRuntime,
         syncActiveLayerState,
     ]);
@@ -2398,6 +2482,8 @@ export default function LEDBoard() {
                 onPhysicsGravityChange={handlePhysicsGravityChange}
                 onPhysicsBounceChange={handlePhysicsBounceChange}
                 onResetPhysics={handleResetPhysics}
+                onBakePhysics={handleBakePhysics}
+                getSimulationFrames={physics.getSimulationFrames}
                 // Gesture props
                 gestureEnabled={gestureEnabled}
                 onToggleGesture={handleToggleGesture}

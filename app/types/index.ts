@@ -65,6 +65,13 @@ export interface SerializedLayerEffectsState {
   speedMultiplier: number;
 }
 
+export interface SerializedLayerPhysicsState {
+  enabled: boolean;
+  preset: string | null;
+  gravityY: number;
+  restitution: number;
+}
+
 export interface SerializedLayerState {
   id: string;
   name: string;
@@ -73,6 +80,8 @@ export interface SerializedLayerState {
   blendMode: LayerBlendMode;
   data: string;
   effects: SerializedLayerEffectsState;
+  /** Optional for backward compatibility with saves made before physics. */
+  physics?: SerializedLayerPhysicsState;
 }
 
 export interface SerializedBoardState {

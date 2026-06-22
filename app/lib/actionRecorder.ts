@@ -16,6 +16,7 @@ export type ActionEvent =
   | { t: number; type: "animation"; layerId: string; name: string | null; action: "play" | "pause" | "stop"; fps?: number }
   | { t: number; type: "effect"; layerId: string; enabled: boolean; presetName: string; distanceMultiplier: number; speedMultiplier: number }
   | { t: number; type: "effectTrigger"; layerId: string; col: number; row: number; color: RGB }
+  | { t: number; type: "physics"; layerId: string; op: "enable" | "disable" | "preset" | "config" | "reset"; preset?: string | null; gravityY?: number; restitution?: number }
   | { t: number; type: "clear" }
   | { t: number; type: "text"; text: string; color: RGB; scale: number; wrap: boolean; animId: string | null }
   | { t: number; type: "palette"; paletteId: string | null }
